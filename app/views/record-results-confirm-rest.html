@@ -1,0 +1,140 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="Confirm the rest as tested with no reaction" %}
+
+{% block content %}
+<style>
+  /* The sum shown as a sum. The vet is being asked to stand behind a number
+     they never typed, so the arithmetic that produced it is on the page
+     rather than behind a link.
+
+     A table rather than a summary list: summary lists stack key over value
+     on small screens, which breaks a column of figures, and a table gets
+     numeric alignment and the right type scale for free. */
+  .app-sum { margin-bottom: 0; }
+  .app-sum .govuk-table__cell--numeric,
+  .app-sum .govuk-table__header--numeric {
+    font-variant-numeric: tabular-nums;
+    width: 6em;
+  }
+  .app-sum__label { font-weight: 400; }
+  .app-sum__hint {
+    display: block;
+    color: #505a5f;
+    font-size: 16px;
+    line-height: 1.25;
+    margin-top: 5px;
+  }
+  /* Room under the last of the three parts, so the hint is not sitting on
+     the total rule. */
+  .app-sum__last .govuk-table__header,
+  .app-sum__last .govuk-table__cell { padding-bottom: 20px; }
+  /* The total. A heavier rule marks it off from the three parts above it,
+     the way a total is set off on paper. */
+  .app-sum__total .govuk-table__header,
+  .app-sum__total .govuk-table__cell {
+    border-top: 3px solid #0b0c0c;
+    border-bottom: 0;
+    font-weight: 700;
+    padding-top: 15px;
+  }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="/record-results-tasks" class="govuk-back-link">Back</a>
+
+    {% if task.rest == 0 %}
+
+      <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+      <h1 class="govuk-heading-l">There is nothing left to confirm</h1>
+
+      <p class="govuk-body">
+        All {{ task.total }} cattle are already accounted for. Every animal has
+        been recorded either as reacting, or as not tested.
+      </p>
+
+      <p class="govuk-body">
+        <a class="govuk-link" href="/record-results-tasks">Back to the task list</a>
+      </p>
+
+    {% else %}
+
+      {# Named for what it does to the data, not "confirm the rest". This is
+         the one action on the paper path that writes a result the vet never
+         typed, so the wording says what is being written: tested, no
+         reaction. Research: "clear" means no reactor to a vet and no
+         reaction to the software, and the two are not the same animal. #}
+      <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+
+      {% if task.restConfirmed %}
+        {# Coming back to a task already done. The sum is still the useful
+           thing on the page - the vet may be here to check it against the
+           paper - so it stays, and only the heading and the action change. #}
+        <h1 class="govuk-heading-l">{{ task.rest }} cattle are confirmed as tested with no reaction</h1>
+
+        <p class="govuk-body govuk-!-margin-bottom-6">
+          You named {{ task.named }} of the {{ task.total }} cattle on this test.
+          The remaining {{ task.rest }} are recorded as tested, with no reaction
+          at either site. If you name more cattle, this figure moves with them.
+        </p>
+      {% else %}
+        <h1 class="govuk-heading-l">Confirm {{ task.rest }} cattle as tested with no reaction</h1>
+
+        <p class="govuk-body govuk-!-margin-bottom-6">
+          You have named {{ task.named }} of the {{ task.total }} cattle on this
+          test. Confirming here records the remaining {{ task.rest }} as tested,
+          with no reaction at either site.
+        </p>
+      {% endif %}
+
+      <table class="govuk-table app-sum">
+        <caption class="govuk-table__caption govuk-visually-hidden">
+          How the {{ task.total }} cattle on this test are accounted for
+        </caption>
+        <tbody class="govuk-table__body">
+          <tr class="govuk-table__row">
+            <th scope="row" class="govuk-table__header app-sum__label">Recorded as reacting</th>
+            <td class="govuk-table__cell govuk-table__cell--numeric">{{ task.reactedCount }}</td>
+          </tr>
+          <tr class="govuk-table__row">
+            <th scope="row" class="govuk-table__header app-sum__label">Recorded as not tested</th>
+            <td class="govuk-table__cell govuk-table__cell--numeric">{{ task.untestedCount }}</td>
+          </tr>
+          <tr class="govuk-table__row app-sum__last">
+            <th scope="row" class="govuk-table__header app-sum__label">
+              Tested, no reaction
+              <span class="app-sum__hint">{{ "What you confirmed" if task.restConfirmed else "What you are confirming here" }}</span>
+            </th>
+            <td class="govuk-table__cell govuk-table__cell--numeric">{{ task.rest }}</td>
+          </tr>
+          <tr class="govuk-table__row app-sum__total">
+            <th scope="row" class="govuk-table__header">Cattle on this test</th>
+            <td class="govuk-table__cell govuk-table__cell--numeric">{{ task.total }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="govuk-body govuk-!-margin-top-4 govuk-!-margin-bottom-6">
+        <a class="govuk-link" href="/v1-4/skin-test-reactors">See the {{ task.rest }} cattle this covers</a>
+      </p>
+
+      {% if task.restConfirmed %}
+        {{ govukButton({ text: "Back to the task list", href: "/record-results-tasks" }) }}
+      {% else %}
+        {{ govukWarningText({
+          text: "Only do this once you have finished naming the cattle that reacted and the cattle you could not test. You can still come back and change any of them.",
+          iconFallbackText: "Warning"
+        }) }}
+
+        <form action="/record-results-confirm-rest" method="post" novalidate>
+          {{ govukButton({ text: "Confirm " + task.rest + " cattle" }) }}
+        </form>
+      {% endif %}
+
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

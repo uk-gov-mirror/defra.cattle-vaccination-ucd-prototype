@@ -1,0 +1,146 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="Add an animal that could not be tested" %}
+
+{% block head %}
+  {{ super() }}
+  <link rel="stylesheet" href="/public/stylesheets/vendor/accessible-autocomplete.min.css">
+{% endblock %}
+
+{% block content %}
+<style>
+  /* Matches the ear-tag field on /v1-5/skin-test-untested-animals, so the
+     same control behaves the same way wherever a vet meets it. */
+  .app-tag-field { max-width: 22rem; }
+  .app-tag-field .autocomplete__input { font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="{{ back }}" class="govuk-back-link">Back</a>
+
+    {% if errors %}
+      {{ govukErrorSummary({ titleText: "There is a problem", errorList: errorList }) }}
+    {% endif %}
+
+    <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+    <h1 class="govuk-heading-l">Add an animal that could not be tested</h1>
+
+    <form action="/record-results-add/untested" method="post" novalidate>
+
+      {# A real select holding every animal still unaccounted for. That is
+         what posts, and what the vet gets if the autocomplete script does
+         not run. The option text is the bare ear tag, because the
+         autocomplete confirms by text. #}
+      {% set _tagItems = [{ value: "", text: "" }] %}
+      {% for animal in suggestions %}
+        {% set _tagItems = _tagItems.concat([{
+          value: animal.officialId,
+          text: animal.officialId,
+          selected: values.earTag == animal.officialId
+        }]) %}
+      {% endfor %}
+
+      <div class="app-tag-field">
+        {{ govukSelect({
+          id: "earTag",
+          name: "earTag",
+          classes: "js-ear-tag",
+          label: { text: "Enter the last 4 digits of the official ear tag", classes: "govuk-label--s" },
+          items: _tagItems,
+          errorMessage: { text: errors.earTag } if errors and errors.earTag
+        }) }}
+      </div>
+
+      {% set otherHtml %}
+        {{ govukInput({
+          id: "reasonOther",
+          name: "reasonOther",
+          value: values.reasonOther,
+          classes: "govuk-!-width-two-thirds",
+          label: { text: "Give the reason" },
+          errorMessage: { text: errors.reasonOther } if errors and errors.reasonOther
+        }) }}
+      {% endset %}
+
+      {% set _reasonItems = [] %}
+      {% for r in reasons %}
+        {% set _reasonItems = _reasonItems.concat([{
+          value: r.value,
+          text: r.text,
+          hint: { text: r.hint } if r.hint,
+          checked: values.reason == r.value,
+          conditional: { html: otherHtml } if r.value == 'other'
+        }]) %}
+      {% endfor %}
+
+      {{ govukRadios({
+        idPrefix: "reason",
+        name: "reason",
+        fieldset: { legend: { text: "Why was it not tested?", classes: "govuk-fieldset__legend--s" } },
+        errorMessage: { text: errors.reason } if errors and errors.reason,
+        items: _reasonItems
+      }) }}
+
+      <div class="govuk-button-group">
+        {{ govukButton({ text: "Add animal" }) }}
+        <a class="govuk-link" href="{{ back }}">Cancel</a>
+      </div>
+    </form>
+
+  </div>
+</div>
+
+<script src="/public/javascripts/vendor/accessible-autocomplete.min.js"></script>
+<script>
+  (function () {
+    var select = document.getElementById('earTag')
+    if (!window.accessibleAutocomplete || !select) return
+
+    function normTag(value) {
+      return String(value || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase()
+    }
+
+    // The vet reads the last 4 digits off the paper sheet, so an ear tag
+    // ENDING in what they typed is what they are looking for. Those come
+    // first; anything merely containing the digits follows.
+    var tags = []
+    Array.prototype.forEach.call(select.options, function (o) { if (o.value) tags.push(o.value) })
+
+    window.accessibleAutocomplete.enhanceSelectElement({
+      selectElement: select,
+      source: function (query, populateResults) {
+        var q = normTag(query)
+        if (!q) return populateResults([])
+        var ends = []
+        var contains = []
+        tags.forEach(function (tag) {
+          var n = normTag(tag)
+          if (n === q) ends.unshift(tag)
+          else if (n.slice(-q.length) === q) ends.push(tag)
+          else if (n.indexOf(q) !== -1) contains.push(tag)
+        })
+        populateResults(ends.concat(contains))
+      },
+      minLength: 2,
+      // The vet is transcribing a number, not browsing. Nothing is
+      // pre-highlighted, so a mis-typed digit can never be confirmed for
+      // them without their having chosen it.
+      autoselect: false,
+      showNoOptionsFound: true,
+      defaultValue: (select.options[select.selectedIndex] || {}).value || '',
+      // Only ever sets. The library calls onConfirm on blur too, with
+      // nothing highlighted and no argument - clearing here would wipe the
+      // animal the vet had just chosen the moment focus moved on.
+      onConfirm: function (confirmed) {
+        if (!confirmed) return
+        var wanted = normTag(confirmed)
+        Array.prototype.forEach.call(select.options, function (o) {
+          if (o.value && normTag(o.value) === wanted) select.value = o.value
+        })
+      }
+    })
+  })()
+</script>
+{% endblock %}

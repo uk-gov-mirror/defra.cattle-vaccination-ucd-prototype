@@ -1,0 +1,56 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="What kind of test is this" %}
+
+{% block content %}
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="/record-results" class="govuk-back-link">Back</a>
+
+    {# Research found the two shapes suit different jobs rather than
+       competing. A whole herd is mostly one answer repeated, so the vet
+       wants the herd in front of them and a way to set most of it at once.
+       A pre-movement is a handful of named animals out of hundreds, always
+       handwritten because the handhelds cannot do them - so naming each one
+       is faster than finding it in a list. #}
+    <form action="/record-results-type" method="post" novalidate>
+
+      {% if errors %}
+        {{ govukErrorSummary({
+          titleText: "There is a problem",
+          errorList: [{ text: errors.testShape, href: "#testShape" }]
+        }) }}
+      {% endif %}
+
+      {{ govukRadios({
+        idPrefix: "testShape",
+        name: "testShape",
+        fieldset: {
+          legend: {
+            text: "What are you recording?",
+            isPageHeading: true,
+            classes: "govuk-fieldset__legend--l"
+          }
+        },
+        errorMessage: { text: errors.testShape } if errors,
+        items: [
+          {
+            value: "herd",
+            text: "A whole herd test",
+            hint: { text: "Every animal on the list is accounted for. You'll see the herd and can set a result for most of them at once." }
+          },
+          {
+            value: "selected",
+            text: "A pre-movement test, or a few named cattle",
+            hint: { text: "You'll name each animal in turn. Nothing you don't name is reported." }
+          }
+        ]
+      }) }}
+
+      {{ govukButton({ text: "Continue" }) }}
+    </form>
+
+  </div>
+</div>
+{% endblock %}

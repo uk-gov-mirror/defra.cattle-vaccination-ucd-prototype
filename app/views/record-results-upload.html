@@ -1,0 +1,50 @@
+{% extends "layouts/main.html" %}
+
+{# "Handheld", to match the label and the rest of the journey. Vets say
+   handheld or handset; "device" is our word, not theirs. #}
+{% set pageName="Upload the file from your handheld" %}
+
+{% block content %}
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="/record-results" class="govuk-back-link">Back</a>
+
+    <form action="/record-results-upload" method="post" novalidate>
+
+      {# One thing on this page: take the file. So the label is the page
+         heading rather than sitting under one - the service manual asks for
+         "one question they have to answer" per page, and a separate h1
+         saying "Upload the file" above a label saying "Select the test
+         file" is that one question asked twice in two different nouns.
+
+         What used to sit here - "Dock your handheld or connect it by USB,
+         then export the test as usual" - is gone. It told a vet how to work
+         a handheld they use every day, for a piece of hardware this service
+         does not touch, and its own last two words conceded they already
+         knew. The line after it ("Upload the file here") repeated the
+         heading, the label and the button.
+
+         The hint states what is accepted rather than giving an example of
+         it, in the same words as the error the vet gets for a file we
+         cannot read: "The selected file must be a .csv or .tbm". #}
+      {{ govukFileUpload({
+        id: "deviceFile",
+        name: "deviceFile",
+        label: {
+          text: "Upload the file from your handheld",
+          classes: "govuk-label--l",
+          isPageHeading: true
+        },
+        hint: { text: "The file must be a .csv or .tbm." }
+      }) }}
+
+      {# Says where it goes, not just what it does. The results are not
+         reported to APHA at this point - the vet checks them first - and
+         "Upload" alone would leave them guessing which. #}
+      {{ govukButton({ text: "Upload and check" }) }}
+    </form>
+
+  </div>
+</div>
+{% endblock %}

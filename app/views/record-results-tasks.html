@@ -1,0 +1,76 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="Record the skin test" %}
+
+{% block content %}
+<style>
+  /* The count that answers "how much is left". Research: "I like to see my
+     list kind of whittling down in front of me… my brain is struggling to
+     filter the ones I've already done out from the ones I haven't." */
+  .app-progress {
+    background-color: #f3f2f1;
+    padding: 15px 20px;
+    margin-bottom: 30px;
+  }
+  .app-progress p { margin-bottom: 0; }
+  .app-progress__count { font-variant-numeric: tabular-nums; }
+  .app-alt-route { margin-top: 30px; padding-top: 20px; border-top: 1px solid #b1b4b6; }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="/record-results-type" class="govuk-back-link">Back</a>
+
+    <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+    <h1 class="govuk-heading-l">Record the skin test</h1>
+
+    {# Deliberately no locked tasks and no set order. Round 1, April:
+       "people tackle in different orders, and our prototype is
+       prescriptive." A sequence of stages would be prescriptive too, just
+       differently - so these are three jobs the vet can do in any order,
+       and the remaining count moves as they do. #}
+    <div class="app-progress" role="status">
+      <p class="govuk-body">
+        <strong class="app-progress__count">{{ task.accountedFor }} of {{ task.total }}</strong>
+        cattle accounted for.
+        {% if task.remaining > 0 %}
+          <strong class="app-progress__count">{{ task.remaining }}</strong>
+          {{ "animal still needs" if task.remaining == 1 else "cattle still need" }} a result.
+        {% elif task.untestedNeedingReason > 0 %}
+          Every animal has a result.
+          <strong class="app-progress__count">{{ task.untestedNeedingReason }}</strong>
+          {{ "animal still needs" if task.untestedNeedingReason == 1 else "cattle still need" }} a reason.
+        {% else %}
+          Every animal has a result.
+        {% endif %}
+      </p>
+    </div>
+
+    {% include "includes/record-task-list.html" %}
+
+    {# The submit is only offered once every animal has a result and every
+       untested animal has a reason. Nothing is blocked before that - the vet
+       can leave and come back - but there is no path to submitting a test
+       with a gap in it. #}
+    {% if task.remaining == 0 and task.untestedNeedingReason == 0 %}
+      {{ govukButton({
+        text: "Continue",
+        href: "/v1-4/skin-test-confirmation",
+        classes: "govuk-!-margin-top-6"
+      }) }}
+    {% endif %}
+
+    {# The escape hatch. One participant worked straight down the list and
+       got into a rhythm doing it, so the category method is offered, not
+       imposed. #}
+    <div class="app-alt-route">
+      <h2 class="govuk-heading-s">Prefer to work down the list?</h2>
+      <p class="govuk-body">
+        <a class="govuk-link" href="/record-results-task/all">Go through all {{ task.total }} cattle in order</a>
+      </p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

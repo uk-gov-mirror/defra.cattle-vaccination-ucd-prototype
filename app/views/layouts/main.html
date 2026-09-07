@@ -3,6 +3,40 @@
 {# Import the GOV.UK button macro so it is available to all pages #}
 {% from "govuk/components/button/macro.njk" import govukButton %}
 
+{# Task list mode: a way back to /record-results-tasks from any page in a
+   section. The task list hands off to screens that were built as
+   standalone linear journeys, so without this a vet who finishes - or
+   changes their mind - part way through a task has no route back to the
+   remaining ones.
+
+   This overrides `main` rather than `beforeContent` because most views
+   already override `beforeContent` for their own back link, without
+   calling super() - so a block there would be silently discarded on the
+   very pages that need it. Only rendered when the routes set
+   recordTaskReturn, so the standalone v1-0..v1-5 journeys are untouched. #}
+{% block main %}
+  {% if data.recordTaskReturn == 'yes' %}
+    <div class="app-task-return">
+      <div class="govuk-width-container">
+        <a class="govuk-link govuk-link--no-visited-state app-task-return__link" href="{{ data.recordTaskHome or '/record-results-tasks' }}">Return to the task list</a>
+      </div>
+    </div>
+    <style>
+      .app-task-return {
+        border-bottom: 1px solid #b1b4b6;
+        padding: 12px 0;
+        margin-bottom: 10px;
+      }
+      .app-task-return__link {
+        font-family: "GDS Transport", arial, sans-serif;
+        font-size: 16px;
+        line-height: 1.25;
+      }
+    </style>
+  {% endif %}
+  {{ super() }}
+{% endblock %}
+
 {# Add a "Dashboard" shortcut to the prototype footer, next to the kit's
    "Clear data" link, so testers can jump back to the dashboard from any
    page. Rebuilds the footer meta items (keeping the kit's own links) and

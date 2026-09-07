@@ -1217,9 +1217,10 @@
           <li><strong class="js-count-clear">{{ counts.clear }}</strong> clear</li>
           <li><strong class="js-count-reaction">{{ counts.reaction }}</strong> reaction</li>
           <li><strong class="js-count-not-tested">{{ counts.notTested }}</strong> not tested</li>
-          {# Only while something is outstanding. Rows open on Clear, so
-             this is normally nothing - a permanent "0 still to record"
-             reads as a broken counter rather than as progress. #}
+          {# Only while something is outstanding. It starts at the full
+             herd and empties as the vet works, and disappears at zero -
+             a permanent "0 still to record" reads as a broken counter
+             rather than as progress. #}
           <li class="app-tally__todo"{% if not counts.todo %} hidden{% endif %}><strong class="js-count-todo">{{ counts.todo }}</strong> still to record</li>
         </ul>
       </div>
@@ -1286,10 +1287,10 @@
 
     function statusOf(row) {
       var checked = row.querySelector('.js-status-input:checked')
-      // Rows open on Clear, so there is normally something checked. The
-      // fallback keeps the client agreeing with the server if that ever
-      // changes back.
-      return checked ? checked.value : 'clear'
+      // Nothing is pre-selected, so an untouched row has no status - and
+      // that is meant to be visible in the tally rather than silently
+      // counted as Clear. Same rule as v14StatusFor on the server.
+      return checked ? checked.value : ''
     }
 
     function updateCounts() {
@@ -1308,8 +1309,8 @@
       document.querySelectorAll('.js-count-reaction').forEach(function (el) { el.textContent = counts.reaction })
       document.querySelectorAll('.js-count-not-tested').forEach(function (el) { el.textContent = counts['not-tested'] })
       document.querySelectorAll('.js-count-todo').forEach(function (el) { el.textContent = counts[''] })
-      // With a default there is nothing outstanding to report, so the
-      // item goes rather than sitting at a permanent zero.
+      // Gone once everything is recorded, rather than sitting at a
+      // permanent zero.
       document.querySelectorAll('.app-tally__todo').forEach(function (el) { el.hidden = !counts[''] })
     }
 

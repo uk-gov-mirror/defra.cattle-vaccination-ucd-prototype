@@ -1,0 +1,64 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="Check the results from your device" %}
+
+{% block content %}
+<style>
+  /* The same panel as /record-results-tasks. Both pages answer the same
+     question before anything else - how much is accounted for - so both
+     answer it in the same place, in the same box. */
+  .app-progress {
+    background-color: #f3f2f1;
+    padding: 15px 20px;
+    margin-bottom: 30px;
+  }
+  .app-progress p { margin-bottom: 0; }
+  .app-progress p + p { margin-top: 5px; }
+  .app-progress__count { font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="/record-results-upload" class="govuk-back-link">Back</a>
+
+    <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+    <h1 class="govuk-heading-l">Check the results from your handheld</h1>
+
+    {# The same four tasks as the paper journey, in the same words. The
+       difference is where the counts came from: on paper the vet fills
+       them in, from a device they arrive already filled and the vet's job
+       is to check them. Which is why nothing here is "Not started". #}
+    <div class="app-progress" role="status">
+      <p class="govuk-body">
+        You uploaded <strong class="app-progress__count">{{ received }}</strong>
+        results from {{ deviceName }}.
+      </p>
+      <p class="govuk-body">
+        {% if task.remaining > 0 %}
+          <strong class="app-progress__count">{{ task.remaining }}</strong>
+          {{ "animal still needs" if task.remaining == 1 else "cattle still need" }} a result.
+        {% elif task.untestedNeedingReason > 0 %}
+          Every animal has a result.
+          <strong class="app-progress__count">{{ task.untestedNeedingReason }}</strong>
+          {{ "animal still needs" if task.untestedNeedingReason == 1 else "cattle still need" }} a reason.
+        {% else %}
+          Every animal has a result. Check them before you send the report to APHA.
+        {% endif %}
+      </p>
+    </div>
+
+    {% set taskMode = "check" %}
+    {% include "includes/record-task-list.html" %}
+
+    {% if task.remaining == 0 and task.untestedNeedingReason == 0 %}
+      {{ govukButton({
+        text: "Continue",
+        href: "/v1-4/skin-test-confirmation",
+        classes: "govuk-!-margin-top-6"
+      }) }}
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

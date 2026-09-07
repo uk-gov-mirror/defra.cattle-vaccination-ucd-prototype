@@ -1,0 +1,68 @@
+{% extends "layouts/main.html" %}
+
+{# The page title matches the question, question mark and all. #}
+{% set pageName="How did you record the results?" %}
+
+{% block content %}
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    {# The fork the service has never had. Most tests are recorded on a
+       third-party handheld and arrive as a file; the rest are written on
+       paper and typed in afterwards. Everything downstream differs, so
+       this is the first question, not a setting buried later. #}
+    <form action="/record-results" method="post" novalidate>
+
+      {% if errors %}
+        {{ govukErrorSummary({
+          titleText: "There is a problem",
+          errorList: [{ text: errors.method, href: "#method" }]
+        }) }}
+      {% endif %}
+
+      {# "How did you record the results?" rather than "How were these
+         results recorded?".
+
+         The old wording was passive with no actor, which the content
+         guidance asks us to avoid: the active voice "puts the focus on the
+         user and the action they need to take". And "these results" pointed
+         at nothing - the vet has not recorded anything in this service yet,
+         so there are no results on screen for "these" to mean. "You" and
+         "the results" are both unambiguous.
+
+         Both hints are gone.
+
+         They did not help anyone answer. A vet knows how they recorded the
+         test - it is the one thing on this page they are certain of - and
+         neither hint told them anything about their own answer. What the
+         hints actually did was narrate the next two screens ("You'll upload
+         the file and check it", "You'll enter the readings from your
+         printed list"), which those screens do for themselves; the upload
+         button already reads "Upload and check".
+
+         "On a handheld device" loses "device" for the same reason it lost
+         it everywhere else - vets say handheld, and "handheld device" says
+         the same thing twice. #}
+      {{ govukRadios({
+        idPrefix: "method",
+        name: "method",
+        fieldset: {
+          legend: {
+            text: "How did you record the results?",
+            isPageHeading: true,
+            classes: "govuk-fieldset__legend--l"
+          }
+        },
+        errorMessage: { text: errors.method } if errors,
+        items: [
+          { value: "device", text: "On a handheld" },
+          { value: "paper", text: "On paper" }
+        ]
+      }) }}
+
+      {{ govukButton({ text: "Continue" }) }}
+    </form>
+
+  </div>
+</div>
+{% endblock %}

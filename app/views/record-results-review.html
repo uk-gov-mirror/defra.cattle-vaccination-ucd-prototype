@@ -1,0 +1,205 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName=review.heading %}
+
+{% block content %}
+<style>
+  /* The same ear tag and the same grid as /v1-4/skin-test-confirmation.
+     A vet reading back what is recorded should see it in the shape they
+     will see it in again on the final check. */
+  .app-ear-tag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .app-ear-tag__prefix { margin-right: 0.35ch; }
+  .app-ear-tag__part { display: inline-block; }
+  .app-ear-tag__part--last4 { padding: 0; font-weight: 700; }
+  .app-ear-tag__part--last4--duplicate {
+    border: 0;
+    border-top: 4px solid #000;
+    border-bottom: 4px solid #000;
+  }
+
+  .app-record-scroll { overflow-x: auto; max-width: 100%; min-width: 0; }
+  .app-record-check { margin-bottom: 0; table-layout: fixed; width: 100%; }
+  .app-record-check .govuk-table__header,
+  .app-record-check .govuk-table__cell {
+    padding: 10px 12px 10px 0;
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+  }
+  /* The line number is the vet's place on the printed sheet, so it reads
+     left to right like the rest of the row and starts flush with the page
+     edge - level with the h1 and the back link above it. The table's own
+     padding-left is already 0; the number only looked indented because it
+     was right-aligned inside its column. */
+  .app-record-check .app-rec-num {
+    width: 7%;
+    text-align: left;
+    color: #505a5f;
+    padding-left: 0;
+    padding-right: 10px;
+    white-space: nowrap;
+  }
+  /* 29 rather than 30 so the widths still sum to 100 now the line number
+     column has taken an extra 1% to fit the word "Line". */
+  .app-record-check .app-rec-tag { width: 29%; padding-right: 12px; }
+  .app-record-check .app-rec-site { width: 6%; font-weight: 700; }
+  .app-record-check .app-rec-mm { width: 8%; }
+  .app-record-check .app-rec-reaction { width: 12%; }
+  .app-record-check .app-rec-result { width: 20%; padding-right: 10px; }
+  .app-record-check .app-rec-reason { width: 44%; padding-right: 10px; }
+  .app-record-check .app-rec-change {
+    width: 10%;
+    text-align: right;
+    padding-right: 0;
+    padding-left: 8px;
+  }
+  .app-record-check thead .govuk-table__header { white-space: nowrap; }
+  .app-record-check tbody.app-rec-animal + tbody.app-rec-animal {
+    border-top: 1px solid #b1b4b6;
+  }
+  .app-record-check tbody.app-rec-animal .govuk-table__cell,
+  .app-record-check tbody.app-rec-animal .govuk-table__header { border: 0; }
+  .app-rec-meta { margin: 2px 0 0; font-size: 16px; color: #505a5f; }
+  .app-rec-meta__sep { padding: 0 4px; }
+  .app-rec-note { margin: 4px 0 0; color: #505a5f; }
+  .app-rec-none { color: #505a5f; }
+  .app-add-link { margin-top: 25px; }
+  .govuk-grid-column-full > .govuk-body { max-width: 38em; }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-full">
+
+    <a href="{{ home }}" class="govuk-back-link">Back</a>
+
+    <span class="govuk-caption-l">Mill House Farm &mdash; 12/312/6802</span>
+    <h1 class="govuk-heading-l">{{ review.heading }}</h1>
+
+    {% if rows.length == 0 %}
+
+      <p class="govuk-body">
+        Nothing is recorded here yet.
+      </p>
+      <p class="govuk-body">
+        <a class="govuk-link" href="{{ review.addHref }}">{{ review.addText }}</a>
+      </p>
+
+    {% else %}
+
+      <p class="govuk-body">
+        <strong>{{ rows.length }}</strong> of {{ total }} cattle.
+        {{ review.lead }}
+      </p>
+
+      <div class="app-record-scroll">
+        <table class="govuk-table govuk-table--small-text-until-tablet app-record-check">
+          <caption class="govuk-table__caption govuk-visually-hidden">{{ review.heading }}</caption>
+          <thead class="govuk-table__head">
+            <tr class="govuk-table__row">
+              {# "Line", not "#". It is the line on the printed sheet the vet
+                 is holding, and a hash is read out as "number sign" or
+                 skipped entirely by a screen reader. #}
+              <th scope="col" class="govuk-table__header app-rec-num">Line</th>
+              <th scope="col" class="govuk-table__header app-rec-tag">Ear tag</th>
+              {% if mode == 'reactions' %}
+                <th scope="col" class="govuk-table__header app-rec-site">
+                  <span class="govuk-visually-hidden">Site, A for avian and B for bovine</span>
+                </th>
+                <th scope="col" class="govuk-table__header app-rec-mm">Pre<span class="govuk-visually-hidden"> in millimetres</span></th>
+                <th scope="col" class="govuk-table__header app-rec-mm">Post<span class="govuk-visually-hidden"> in millimetres</span></th>
+                <th scope="col" class="govuk-table__header app-rec-reaction">Reaction</th>
+                <th scope="col" class="govuk-table__header app-rec-result">Result</th>
+              {% else %}
+                <th scope="col" class="govuk-table__header app-rec-reason">Reason</th>
+              {% endif %}
+              <th scope="col" class="govuk-table__header app-rec-change"><span class="govuk-visually-hidden">Change</span></th>
+            </tr>
+          </thead>
+
+          {% for row in rows %}
+            <tbody class="govuk-table__body app-rec-animal">
+              {% set animalCell %}
+                <span class="app-ear-tag">
+                  <span class="app-ear-tag__prefix">{{ row.earTagParts.prefix }}</span><span class="app-ear-tag__part">{{ row.earTagParts.herd }}</span><span class="app-ear-tag__part">{{ row.earTagParts.check }}</span><span class="app-ear-tag__part">{{ row.earTagParts.individualStart }}</span><span class="app-ear-tag__part app-ear-tag__part--last4{% if row.isDuplicate %} app-ear-tag__part--last4--duplicate{% endif %}"{% if row.isDuplicate %} title="Another animal on this farm shares the last 4 digits of this ear tag"{% endif %}>{{ row.earTagParts.last4 }}</span>
+                </span>
+                <p class="app-rec-meta">
+                  <span>{%- if row.sex == 'F' -%}Female{% elif row.sex == 'M' %}Male{% else %}{{ row.sex }}{% endif -%}</span>
+                  <span class="app-rec-meta__sep" aria-hidden="true">&middot;</span>
+                  <span><span class="govuk-visually-hidden">Breed </span>{{ row.breed }}</span>
+                </p>
+              {% endset %}
+
+              {# One animal, one page. Sending the vet into the 102-row
+                 table to change a single record means finding it again in
+                 a list they have just been reading. #}
+              {% set changeCell %}
+                <a class="govuk-link" href="/record-results-edit/{{ row.officialId }}">Change<span class="govuk-visually-hidden"> the record for animal {{ row.n }}, {{ row.officialId }}</span></a>
+              {% endset %}
+
+              {% if mode == 'reactions' %}
+                <tr class="govuk-table__row">
+                  <td class="govuk-table__cell app-rec-num" rowspan="2">{{ row.n }}</td>
+                  <td class="govuk-table__cell app-rec-tag" rowspan="2">{{ animalCell | safe }}</td>
+                  <th scope="row" class="govuk-table__header app-rec-site">
+                    <span aria-hidden="true">A</span><span class="govuk-visually-hidden">Avian</span>
+                  </th>
+                  <td class="govuk-table__cell app-rec-mm">{{ row.measurements.avianBeforeInjection or "—" }}</td>
+                  <td class="govuk-table__cell app-rec-mm">{{ row.measurements.avianAfter72Hours or "—" }}</td>
+                  <td class="govuk-table__cell app-rec-reaction">{{ "SO" if row.measurements.avianOedema == 'SO' else "C" }}</td>
+                  <td class="govuk-table__cell app-rec-result" rowspan="2">
+                    {%- if row.outcome == 'reactor' -%}
+                      {{ govukTag({ text: "Reactor", classes: "govuk-tag--red" }) }}
+                    {%- elif row.outcome == 'inconclusive' -%}
+                      {{ govukTag({ text: "Inconclusive", classes: "govuk-tag--yellow" }) }}
+                    {%- elif row.outcome == 'incomplete' -%}
+                      {{ govukTag({ text: "Readings missing", classes: "govuk-tag--orange" }) }}
+                    {%- else -%}
+                      {{ govukTag({ text: "Pass", classes: "govuk-tag--green" }) }}
+                    {%- endif -%}
+                    {%- if row.reactorReference %}<p class="app-rec-note">Tag {{ row.reactorReference }}</p>{% endif -%}
+                  </td>
+                  <td class="govuk-table__cell app-rec-change" rowspan="2">{{ changeCell | safe }}</td>
+                </tr>
+                <tr class="govuk-table__row">
+                  <th scope="row" class="govuk-table__header app-rec-site">
+                    <span aria-hidden="true">B</span><span class="govuk-visually-hidden">Bovine</span>
+                  </th>
+                  <td class="govuk-table__cell app-rec-mm">{{ row.measurements.bovineBeforeInjection or "—" }}</td>
+                  <td class="govuk-table__cell app-rec-mm">{{ row.measurements.bovineAfter72Hours or "—" }}</td>
+                  <td class="govuk-table__cell app-rec-reaction">{{ "SO" if row.measurements.bovineOedema == 'SO' else "C" }}</td>
+                </tr>
+              {% else %}
+                <tr class="govuk-table__row">
+                  <td class="govuk-table__cell app-rec-num">{{ row.n }}</td>
+                  <td class="govuk-table__cell app-rec-tag">{{ animalCell | safe }}</td>
+                  <td class="govuk-table__cell app-rec-reason">
+                    {%- if row.reasonLabel -%}{{ row.reasonLabel }}
+                    {%- else -%}<span class="app-rec-none">No reason given</span>{%- endif -%}
+                    {%- if row.partTest %} {{ govukTag({ text: "Part test", classes: "govuk-tag--blue" }) }}{% endif -%}
+                  </td>
+                  <td class="govuk-table__cell app-rec-change">{{ changeCell | safe }}</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          {% endfor %}
+        </table>
+      </div>
+
+      <p class="govuk-body app-add-link">
+        <a class="govuk-link" href="{{ review.addHref }}">{{ review.addText }}</a>
+      </p>
+
+    {% endif %}
+
+    {{ govukButton({ text: "Continue", href: home, classes: "govuk-!-margin-top-4" }) }}
+
+  </div>
+</div>
+{% endblock %}

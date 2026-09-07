@@ -2,6 +2,213 @@ const govukPrototypeKit = require('govuk-prototype-kit')
 const router = govukPrototypeKit.requests.setupRouter()
 
 // -----------------------------------------------------------------------------
+// Task list mode (the check-data paper journey)
+//
+// The three tasks on /record-results-tasks hand off to screens that were
+// built as standalone linear journeys: finishing one carries the vet on
+// into the next screen of that journey rather than back to the list, so
+// there is no way to pick up the remaining tasks.
+//
+// The GDS task list pattern is that each task is a self-contained section
+// which returns the user to the list when it is done, and that every page
+// inside a section offers a way back. Both halves are here:
+//
+//   1. Each task link goes through /record-results-task/<section>, which
+//      records which section the vet is in. When a route inside that
+//      section redirects past its own last page, the redirect is turned
+//      into a return to the task list.
+//   2. While in task mode, every page carries a "Return to the task list"
+//      link, so a vet who changes their mind mid-section is not stranded.
+//
+// Scoped to the section the vet actually entered, so the same redirect
+// (for example to skin-test-confirmation) still behaves normally in the
+// standalone v1-0..v1-5 journeys, which must not change.
+// -----------------------------------------------------------------------------
+const RECORD_TASK_SECTIONS = {
+  // Picking untested cattle runs on into the part-test question, which
+  // belongs to this task; it ends when the journey moves on to asking
+  // about cattle that are not on the list.
+  untested: {
+    entry: '/v1-3/skin-test-untested',
+    // Once anything is recorded the task opens on what is recorded, not on
+    // the empty picker. A vet who sees "25 recorded" and clicks it is
+    // asking to see the 25, not to choose 25 again.
+    review: '/record-results-review/untested',
+    exits: ['skin-test-add-cattle-question', 'skin-test-confirmation']
+  },
+  // Add-another finishes by moving on to the untested animals it would
+  // normally ask about next. That is task 1's job here.
+  reactions: {
+    entry: '/v1-5/skin-test-reactions',
+    review: '/record-results-review/reactions',
+    exits: ['skin-test-untested-animals', 'skin-test-add-cattle-question', 'skin-test-confirmation']
+  },
+  'add-cattle': {
+    entry: '/v1-4/skin-test-add-cattle-question',
+    // The added-cattle screen is already a review of what was added, so
+    // it is the landing page rather than a review of our own. It is not
+    // used as an exit target - its own Continue leads to the
+    // confirmation, which would bounce straight back to it.
+    review: '/v1-4/skin-test-added-cattle',
+    reviewIsExternal: true,
+    exits: ['skin-test-confirmation']
+  },
+  // The escape hatch: work down all 102 in v1-4. No exits are trapped -
+  // the vet has chosen the linear journey, so it should behave like one -
+  // but the return link stays available.
+  all: {
+    entry: '/v1-4/skin-test-reactors',
+    exits: []
+  }
+}
+
+// ---------------------------------------------------------------------
+// Check answers: Change comes back to the check page
+//
+// The check answers pattern asks that changing an answer returns the user
+// to the check page. These screens were built as steps in a linear
+// journey, so their POSTs redirect to whatever comes next - a vet who
+// clicked Change on the test date was walked through test type, batch
+// numbers, reactors and untested before they saw the check page again.
+//
+// Rather than rewire every one of those steps (they are still journey
+// steps for a vet going through in order), the Change link says where it
+// came from, and the first redirect that means "this edit is finished" is
+// sent there instead.
+//
+// A change that genuinely needs more than one screen names the pages that
+// count as part of the same edit; redirects to those pass through
+// untouched. Changing the test type to one that needs new batch numbers
+// still asks for them - and returns to the check page when it has them.
+const CHECK_CHANGE_CONTINUE = {
+  'skin-test-date': [],
+  'skin-test-type': ['skin-test-batch-details'],
+  'skin-test-batch-details': ['skin-test-batch-details']
+}
+
+// The screen a path belongs to, ignoring the version and anything after
+// it: /v1-4/skin-test-batch-details/sicct is the batch details screen.
+function checkChangeKey(path) {
+  const m = String(path || '').match(/\/v1-\d+\/(skin-test-[a-z0-9-]+)/)
+  return m ? m[1] : null
+}
+
+router.use(function (req, res, next) {
+  const data = (req.session && req.session.data) || {}
+  const key = checkChangeKey(req.path)
+
+  // Arriving with ?return= starts a change.
+  if (key && req.method === 'GET' && req.query && req.query.return) {
+    const to = recordSafeReturn(req.query.return)
+    if (to) {
+      data.checkChangeReturn = to
+      data.checkChangeFrom = key
+    }
+  }
+
+  let from = data.checkChangeFrom
+  const back = data.checkChangeReturn
+
+  // A GET for anything outside the current change means the vet went
+  // somewhere else - including landing back on the check page. Forget it,
+  // so a redirect much later in the session is not hijacked.
+  if (from && req.method === 'GET' && key !== from &&
+      (CHECK_CHANGE_CONTINUE[from] || []).indexOf(key) === -1) {
+    data.checkChangeReturn = null
+    data.checkChangeFrom = null
+    from = null
+  }
+
+  if (!from || !back) return next()
+
+  const onward = res.redirect.bind(res)
+  res.redirect = function (url) {
+    if (typeof url === 'string') {
+      const target = checkChangeKey(url)
+      const stillEditing = target === from ||
+        (CHECK_CHANGE_CONTINUE[from] || []).indexOf(target) !== -1
+      if (!stillEditing) {
+        data.checkChangeReturn = null
+        data.checkChangeFrom = null
+        return onward(back)
+      }
+    }
+    return onward(url)
+  }
+  next()
+})
+
+// Leaving the check-data journey altogether. Anything under /record-results
+// keeps task mode; these clear it, so the standalone journeys and the home
+// and start pages are never decorated with a return link.
+function recordClearsTaskMode(path) {
+  if (path === '/' || path === '/start') return true
+  return /\/(dashboard|skin-test-submitted|report-submitted)$/.test(path)
+}
+
+router.use(function (req, res, next) {
+  const data = (req.session && req.session.data) || {}
+
+  if (recordClearsTaskMode(req.path)) {
+    if (req.session && req.session.data) {
+      req.session.data.recordTaskMode = null
+      req.session.data.recordTaskSection = null
+      req.session.data.recordTaskReturn = null
+      req.session.data.recordTaskHome = null
+    }
+    return next()
+  }
+
+  // Show the return link on every page outside the check-data screens
+  // (those carry their own back links and would end up with two).
+  //
+  // The Prototype Kit copies session data into res.locals.data before this
+  // runs, so the flag has to be written to both to reach the layout on
+  // this request rather than the next one - the same mirroring
+  // v14SeedSession does.
+  const showReturn = data.recordTaskMode === 'yes' && req.path.indexOf('/record-results') !== 0
+  // Which list the vet came from. Paper and device show the same four
+  // tasks on different pages, so someone who started at the device check
+  // has to land back on the device check, not on the paper list.
+  const home = data.recordTaskHome || '/record-results-tasks'
+  if (req.session && req.session.data) {
+    req.session.data.recordTaskReturn = showReturn ? 'yes' : null
+    req.session.data.recordTaskHome = home
+  }
+  if (res.locals) {
+    // Mutate the kit's copy rather than replacing it - replacing would drop
+    // every other value the page needs.
+    if (!res.locals.data) res.locals.data = {}
+    res.locals.data.recordTaskReturn = showReturn ? 'yes' : null
+    res.locals.data.recordTaskHome = home
+  }
+
+  if (data.recordTaskMode !== 'yes') return next()
+
+  // The check-data screens are never inside a section, and their own
+  // redirects must not be rewritten - notably the task entry route below,
+  // which redirects to a page that is another section's exit.
+  if (req.path.indexOf('/record-results') === 0) return next()
+
+  const section = RECORD_TASK_SECTIONS[data.recordTaskSection]
+  if (!section || !section.exits.length) return next()
+
+  const originalRedirect = res.redirect.bind(res)
+  res.redirect = function (url) {
+    if (typeof url === 'string') {
+      const lastSegment = url.split('?')[0].split('#')[0].split('/').pop()
+      if (section.exits.indexOf(lastSegment) !== -1) {
+        return originalRedirect(
+          (section.review && !section.reviewIsExternal) ? section.review : home
+        )
+      }
+    }
+    return originalRedirect(url)
+  }
+  next()
+})
+
+// -----------------------------------------------------------------------------
 // Version feature checks
 //
 // v1-4 is a fork of v1-3: it inherits every v1-3 behaviour and then overrides
@@ -231,7 +438,11 @@ const herdData = {
   '12/320/6799-01': { cph: '12/320/6799-01', farm: 'High Pastures Farm', address: 'High Pastures Beef Unit, Northallerton, DL7 9KL', cattle: '187', holdingLabel: 'Beef finishing unit' },
   '24/402/6800': { cph: '24/402/6800', farm: 'Green Lane Farm', address: 'Green Lane Farm, Pocklington, YO42 1LM', cattle: '72' },
   '24/405/6801': { cph: '24/405/6801', farm: 'Sunnyside Farm', address: 'Sunnyside Farm, Driffield, YO25 6MN', cattle: '158' },
-  '12/312/6802': { cph: '12/312/6802', farm: 'Mill House Farm', address: 'Mill House Farm, Richmond, DL10 4NP', cattle: '38' },
+  // 102, not 38. Mill House is the research herd every v1-3+ screen is
+  // built on and it holds 102 cattle; the search results and the herd
+  // summary were still quoting a number from before that herd existed, so
+  // a vet was told 38 and then handed a list of 102.
+  '12/312/6802': { cph: '12/312/6802', farm: 'Mill House Farm', address: 'Mill House Farm, Richmond, DL10 4NP', cattle: '102' },
   '12/365/6803': { cph: '12/365/6803', farm: 'Hazelcroft Farm', address: 'Hazelcroft Farm, Helmsley, YO62 5PQ', cattle: '146' },
   // Birch Hollow Farm – main holding + youngstock unit
   '17/221/6804':    { cph: '17/221/6804',    farm: 'Birch Hollow Farm', address: 'Birch Hollow Farm, Otley, LS21 3QR',           cattle: '250', holdingLabel: 'Main holding' },
@@ -7372,6 +7583,10 @@ function registerSkinTestRoutes(version) {
   // derive a DIVA test; V5 forces SICCT because that is the journey being
   // tested. Change V14_DEFAULT_CPH to test against a different herd.
   const V14_DEFAULT_CPH = '12/312/6802'
+  // The tuberculin batch the demo herd was tested with. Held here rather
+  // than in a template so the check page, the batch screen and anything
+  // else that shows it are all reading the same value.
+  const V14_DEMO_SICCT_BATCH = '138009G'
 
   // The one animal the vet met at the crush that was not on the printed
   // list. It is the same animal they wrote on the sheet's blank
@@ -7380,9 +7595,21 @@ function registerSkinTestRoutes(version) {
   // them are describing one animal, not two. If the sheet's extra
   // changes (buildExtraCattle, seeded from the herd mark), change this
   // to match or the two stop agreeing.
+  // The animal the vet finds in the yard that the printed list does not
+  // have. A Mill House tag: herd mark 987654, check digit 5, the same as
+  // the other 81 home-bred animals on the list.
+  //
+  // It used to read UK987654900022 - Mill House's herd mark with a check
+  // digit of 9. One herd mark has one check digit, so that tag could not
+  // exist, and it sat next to 81 animals that showed the right one.
+  //
+  // 00231 is outside the 00071-00224 range the list covers, so it reads as
+  // a home-bred animal registered after the list was pulled - the ordinary
+  // reason an animal is missing from it - and no other animal on the farm
+  // ends in 0231, so it does not trip the duplicate last-4 banding.
   const V14_SEEDED_ADDED_CATTLE = [
     {
-      officialId: 'UK987654900022',
+      officialId: 'UK987654500231',
       breed: 'BB',
       sex: 'M',
       dob: '25/09/2021',
@@ -7391,6 +7618,27 @@ function registerSkinTestRoutes(version) {
   ]
 
   function v14SeedListSession(req, res) { return v14SeedSession(req, res) }
+
+  // The check-data journey sits outside this closure but needs the same
+  // Mill House session, so a reference is published once. The function
+  // does not read `version`, so whichever registration lands here first
+  // gives the same result.
+  if (!recordSeedSession) { recordSeedSession = v14SeedSession }
+  // v14CheckList turns the session into one row per animal - status,
+  // reason, readings, outcome. The check-data review pages need exactly
+  // that, so the v1-4 build of it is published for them. v1-4 rather than
+  // any version because v14WithEligibility reads `version`.
+  if (version === 'v1-4') {
+    recordCheckList = v14CheckList
+    recordSaveAnimal = v14SaveOneAnimal
+    // V15_REASONS is declared further down this closure, so it is read
+    // lazily at request time rather than captured here.
+    recordReasons = function () { return V15_REASONS }
+    // skinTestEntries is indexed by the animal's position in the sorted
+    // list, not by ear tag, so anything writing readings straight into
+    // the session needs this map to put them in the right slot.
+    recordEntryIndex = v14EntryIndex
+  }
 
   function v14SeedSession(req, res) {
     const data = req.session.data
@@ -7432,6 +7680,24 @@ function registerSkinTestRoutes(version) {
       data.skinTestDay2Month = String(day2.getMonth() + 1)
       data.skinTestDay2Year = String(day2.getFullYear())
     }
+    // The batch number, for the same reason as the dates above.
+    //
+    // The check page was printing "138009G" from a fallback inside its own
+    // template, so the number existed on that one page and nowhere else:
+    // Change opened an empty field, and anything typed into it changed a
+    // value the check page was never reading. Seeded here it is real - the
+    // check page reads it, the batch screen opens with it, and an edit
+    // sticks. Both stores are written because the batch screen reads
+    // skinTestBatchDetails and the older templates read the array.
+    if (!Array.isArray(data.skinTestSicctBatches) || !data.skinTestSicctBatches.length) {
+      data.skinTestSicctBatches = [V14_DEMO_SICCT_BATCH]
+    }
+    data.skinTestBatchDetails = data.skinTestBatchDetails || {}
+    data.skinTestBatchDetails.sicct = data.skinTestBatchDetails.sicct || {}
+    if (!data.skinTestBatchDetails.sicct.batch) {
+      data.skinTestBatchDetails.sicct.batch = data.skinTestSicctBatches[0] || V14_DEMO_SICCT_BATCH
+    }
+
     if (!data.administeredBy) {
       data.administeredBy = 'self'
       data.theirRole = 'vet'
@@ -7520,19 +7786,22 @@ function registerSkinTestRoutes(version) {
       ? req.session.data.skinTestUntested
       : []
     if (untested.indexOf(officialId) !== -1) return 'not-tested'
-    // Nothing recorded yet: the row opens on Clear.
+    // Nothing recorded yet: the row opens with nothing selected.
     //
-    // The Design System asks that radios are not pre-selected, and the
-    // objection here is real - a pre-set Clear asserts a clinical finding,
-    // "tested, no reaction", that the vet has not made, and makes a row
-    // nobody looked at indistinguishable from one they decided about. The
-    // trade is that the vet only touches the exceptions, which on a herd
-    // of 102 is most of the work.
+    // Three of the four round 3 participants argued against a pre-set
+    // Clear, on clinical grounds - "it's quite hard to actually confirm
+    // something's clear. You have to check it multiple times." A default
+    // asserts a finding the vet has not made, and makes a row nobody
+    // looked at indistinguishable from one they decided about. On a part
+    // test that is worse than untidy: an animal at the other site, never
+    // touched, would submit as tested.
     //
-    // The unrecorded-rows check on submit is left in place. It cannot fire
-    // while this returns a status, and it is what makes removing the
-    // default a one-line change if research says to.
-    return 'clear'
+    // The cost is real - the vet now touches every row rather than only
+    // the exceptions - and quick apply is what pays it back.
+    //
+    // The unrecorded-rows check on submit now does its job: it could
+    // never fire while this returned a status.
+    return ''
   }
 
   // Where the vet goes once the review (and any measurements) are done.
@@ -7598,6 +7867,72 @@ function registerSkinTestRoutes(version) {
   // order, with whatever the vet recorded against each one. Only v1-4
   // asks for this; every other version renders its own confirmation
   // view and never reads it.
+  // Save one animal's record. The single-record edit screen in the
+  // check-data journey writes through here, so one animal edited on its
+  // own lands in exactly the session shape the bulk review POST produces.
+  // Four stores have to agree: the status, the reactor list for the
+  // phase, the untested list with its reasons, and the readings.
+  function v14SaveOneAnimal(req, officialId, change) {
+    const data = req.session.data
+    const phase = getCurrentReactorPhase(req)
+    const status = change.status
+
+    const statuses = Object.assign({}, data.skinTestReviewStatuses || {})
+    statuses[officialId] = status
+    data.skinTestReviewStatuses = statuses
+
+    const reactors = new Set(getReactorsForPhase(req, phase))
+    if (status === 'reaction') reactors.add(officialId)
+    else reactors.delete(officialId)
+    const reactorIds = Array.from(reactors)
+    setReactorsForPhase(req, phase, reactorIds)
+    data.anyReactors = reactorIds.length ? 'yes' : 'no'
+    const anyByPhase = Object.assign({}, data.anyReactorsByPhase || {})
+    anyByPhase[phase] = reactorIds.length ? 'yes' : 'no'
+    data.anyReactorsByPhase = anyByPhase
+
+    const untested = (Array.isArray(data.skinTestUntested) ? data.skinTestUntested : [])
+      .filter(function (id) { return id !== officialId })
+    const reasons = Object.assign({}, data.skinTestUntestedReasons || {})
+    const others = Object.assign({}, data.skinTestUntestedReasonOthers || {})
+    if (status === 'not-tested') {
+      untested.push(officialId)
+      reasons[officialId] = change.reason || ''
+      others[officialId] = change.reason === 'other' ? (change.reasonOther || '') : ''
+    } else {
+      delete reasons[officialId]
+      delete others[officialId]
+    }
+    data.skinTestUntested = untested
+    data.skinTestUntestedReasons = reasons
+    data.skinTestUntestedReasonOthers = others
+
+    const allEntries = getEntries(req)
+    const stored = Array.isArray(data.skinTestEntries) ? data.skinTestEntries.slice() : []
+    while (stored.length < allEntries.length) stored.push(blankEntry())
+    const at = v14EntryIndex(req).get(officialId)
+    if (typeof at === 'number') {
+      if (status === 'reaction') {
+        const m = change.measurements || {}
+        // The result is calculated, never entered - the same authoritative
+        // pass the bulk review runs.
+        const interpretation = v14Interpret(m)
+        stored[at] = Object.assign({}, stored[at] || blankEntry(), {
+          status: 'done',
+          performedTest: 'SICCT',
+          divaStatus: 'done',
+          overallResult: interpretation
+            ? sicctInterpretation.toLegacyOverallResult(interpretation.resultCode)
+            : '',
+          sicctInterpretation: interpretation
+        }, m)
+      } else {
+        stored[at] = blankEntry()
+      }
+    }
+    data.skinTestEntries = stored
+  }
+
   function v14CheckList(req) {
     const animals = getReportingAnimalsWithFlags(req)
     if (!animals.length) return []
@@ -7742,11 +8077,15 @@ function registerSkinTestRoutes(version) {
         measurementErrors: measurementErrors[a.officialId] || {}
       })
     })
-    const counts = { clear: 0, reaction: 0, notTested: 0 }
+    // A row with no status is not clear - it is untouched, and the
+    // difference is the whole point of removing the default. Anything the
+    // tally cannot account for goes to "still to record".
+    const counts = { clear: 0, reaction: 0, notTested: 0, todo: 0 }
     rows.forEach(function (r) {
       if (r.status === 'reaction') counts.reaction++
       else if (r.status === 'not-tested') counts.notTested++
-      else counts.clear++
+      else if (r.status === 'clear') counts.clear++
+      else counts.todo++
     })
 
     res.render(`${version}/skin-test-review`, {
@@ -10925,6 +11264,11 @@ function registerSkinTestRoutes(version) {
       sicctBatches,
       divaBatches,
       checkList: version === 'v1-4' ? v14CheckList(req) : [],
+      // The same page, reached two ways. A vet who uploaded a file is
+      // checking the file against the yard; a vet who typed the results in
+      // is checking their typing against the paper. Back and the opening
+      // line differ; everything else is the same check.
+      fromDevice: req.session.data.recordMethod === 'device',
       declarationError: declarationError,
       declarationConfirmed: req.session.data.skinTestDeclaration === 'confirmed'
     })
@@ -11375,6 +11719,599 @@ function registerSkinTestRoutes(version) {
     res.redirect(`/${version}/skin-test-confirmation`)
   })
 }
+
+// ---------------------------------------------------------------------
+// "Check data" - the journey in front of the recording screens.
+//
+// Most tests are recorded on a third-party handheld and arrive as a file;
+// the rest are written on paper and typed in afterwards. Everything after
+// this point differs, so it is the first question rather than a setting
+// found later. Research also found the two manual shapes suit different
+// jobs - a whole herd is mostly one answer repeated, a pre-movement is a
+// handful of named animals - so the manual path forks again.
+//
+// Version-free on purpose: this sits above the versioned prototypes and
+// routes into them.
+// ---------------------------------------------------------------------
+
+// The problems a file from a device can arrive with. Every one of these
+// came out of research; none of them are handled anywhere in the service
+// today, which is the point of showing them.
+router.get('/record-results', function (req, res) {
+  res.render('record-results')
+})
+
+router.post('/record-results', function (req, res) {
+  const method = (req.body.method || '').trim()
+  if (method !== 'device' && method !== 'paper') {
+    return res.render('record-results', {
+      // Matches the question. An error that rephrases the thing the vet
+      // just failed to answer makes them read both and work out they are
+      // the same question.
+      errors: { method: 'Select how you recorded the results' }
+    })
+  }
+  req.session.data.recordMethod = method
+  // Switching to paper after trying the device path starts from nothing -
+  // otherwise the paper task list opens with the device's results already
+  // in it, which is the opposite of what the vet asked for.
+  if (method === 'paper' && req.session.data.deviceImportSeeded === 'yes') {
+    req.session.data.skinTestUntested = []
+    req.session.data.skinTestUntestedReasons = {}
+    req.session.data.skinTestReactorsByPhase = {}
+    req.session.data.skinTestReviewStatuses = {}
+    req.session.data.recordRestConfirmed = null
+    req.session.data.deviceImportSeeded = null
+  }
+  return res.redirect(method === 'device'
+    ? '/record-results-upload'
+    : '/record-results-type')
+})
+
+router.get('/record-results-upload', function (req, res) {
+  res.render('record-results-upload')
+})
+
+router.post('/record-results-upload', function (req, res) {
+  // The file is not read. A fixed set of results is loaded instead, so the
+  // checking task can be tested without a device to hand.
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  seedDeviceImport(req)
+
+  // Straight to check and send. The import arrives complete - every animal
+  // already has a result - so there is no work to list, and a task list in
+  // front of a finished file is a page the vet clicks past. What they
+  // actually have to do is read the results, which is this page.
+  //
+  // Task mode is turned off rather than left as it was: it draws a "Return
+  // to the task list" bar across the top of every screen, and on this path
+  // there is no task list to return to.
+  req.session.data.recordTaskMode = null
+  req.session.data.recordTaskSection = null
+  req.session.data.recordTaskHome = null
+  req.session.data.recordTaskReturn = null
+
+  res.redirect('/v1-4/skin-test-confirmation')
+})
+
+// Readings as they would arrive from a handheld: the same shape as the
+// printed sheet's demo readings, but plain numbers rather than the
+// handwriting markup buildDemo produces. Deterministic per animal, so the
+// same tag always shows the same figures across reloads.
+function deviceReadings(officialId, role) {
+  let h = 2166136261
+  const sid = String(officialId)
+  for (let i = 0; i < sid.length; i++) { h ^= sid.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  const rnd = function (n) { h = (Math.imul(h, 1103515245) + 12345) >>> 0; return Math.floor((h / 4294967296) * n) }
+  const aPre = 4 + rnd(5)
+  const bPre = 4 + rnd(5)
+  let bPost = bPre
+  if (role === 'reactor') bPost = bPre + 6 + rnd(6)
+  else if (role === 'inconclusive') bPost = bPre + 4
+  return {
+    avianBeforeInjection: String(aPre),
+    avianAfter72Hours: String(aPre),
+    bovineBeforeInjection: String(bPre),
+    bovineAfter72Hours: String(bPost),
+    avianOedema: 'C',
+    bovineOedema: 'C'
+  }
+}
+
+// The tag number physically applied to a reactor. Only a reactor gets one
+// - an inconclusive animal stays on the farm to be retested.
+function deviceReactorRef(officialId) {
+  let h = 5381
+  const sid = String(officialId)
+  for (let i = 0; i < sid.length; i++) { h = ((h * 33) ^ sid.charCodeAt(i)) >>> 0 }
+  return String(100 + (h % 900))
+}
+
+// The reason a device import would carry for each kind of untested animal,
+// in the same vocabulary the vet picks from on the reason screen. An
+// animal the handheld has no reading for is not "unexplained" - the herd
+// record already says why - so the import arrives with the reason filled
+// in and the vet is checking it rather than supplying it.
+const DEVICE_IMPORT_REASONS = {
+  'not-presented': 'not-presented',
+  dead: 'dead',
+  'recent-test': 'not-eligible',
+  'under-age': 'not-eligible'
+}
+
+// Fill the same session state the paper journey writes, from what the
+// device sent. Guarded, so a vet who goes into a task and changes
+// something does not have it overwritten by a revisit to this page.
+function seedDeviceImport(req) {
+  const data = req.session.data
+  if (data.deviceImportSeeded === 'yes') return
+  const animals = getAnimalsForSelection('12/312/6802', 'v1-4') || []
+
+  const untested = []
+  const reasons = Object.assign({}, data.skinTestUntestedReasons || {})
+  const reacted = []
+  animals.forEach(function (a) {
+    const reason = DEVICE_IMPORT_REASONS[a.demoRole]
+    if (reason) {
+      untested.push(a.officialId)
+      reasons[a.officialId] = reason
+    } else if (a.demoRole === 'reactor' || a.demoRole === 'inconclusive') {
+      reacted.push(a.officialId)
+    }
+  })
+
+  data.skinTestUntested = untested
+  data.skinTestUntestedReasons = reasons
+  data.skinTestReactorsByPhase = Object.assign({}, data.skinTestReactorsByPhase || {}, { sicct: reacted })
+
+  // The readings themselves. A handheld sends the four figures, not just
+  // "this one reacted" - without them the review reads "Readings missing"
+  // for every animal, which is true of the session but false of the file.
+  const idx = recordEntryIndex ? recordEntryIndex(req) : null
+  if (idx) {
+    const entries = Array.isArray(data.skinTestEntries) ? data.skinTestEntries.slice() : []
+    animals.forEach(function (a) {
+      if (a.demoRole !== 'reactor' && a.demoRole !== 'inconclusive') return
+      const at = idx.get(a.officialId)
+      if (typeof at !== 'number') return
+      const m = deviceReadings(a.officialId, a.demoRole)
+      entries[at] = Object.assign({}, entries[at] || {}, m, {
+        reactorReference: a.demoRole === 'reactor' ? deviceReactorRef(a.officialId) : ''
+      })
+    })
+    data.skinTestEntries = entries
+  }
+  // The device reports the rest as tested with no reaction. That is the
+  // claim the vet is being asked to check, so it arrives made rather than
+  // as a job still to do.
+  data.recordRestConfirmed = 'yes'
+  data.deviceImportSeeded = 'yes'
+}
+
+router.get('/record-results-check', function (req, res) {
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  seedDeviceImport(req)
+  req.session.data.recordTaskMode = 'yes'
+  req.session.data.recordTaskSection = null
+  req.session.data.recordTaskHome = '/record-results-check'
+  const animals = getAnimalsForSelection('12/312/6802', 'v1-4') || []
+
+  res.render('record-results-check', {
+    deviceName: 'TB Master',
+    received: animals.length,
+    task: recordTaskState(req)
+  })
+})
+
+// Assigned by registerSkinTestRoutes below, at load time and before any
+// request is served.
+let recordSeedSession = null
+let recordCheckList = null
+let recordEntryIndex = null
+let recordSaveAnimal = null
+let recordReasons = null
+
+router.get('/record-results-type', function (req, res) {
+  res.render('record-results-type')
+})
+
+router.post('/record-results-type', function (req, res) {
+  const shape = (req.body.testShape || '').trim()
+  if (shape !== 'herd' && shape !== 'selected') {
+    return res.render('record-results-type', {
+      errors: { testShape: 'Select what you are recording' }
+    })
+  }
+  req.session.data.recordShape = shape
+  // A whole herd goes to the task list, which lets the vet work by
+  // category the way research says they do; a handful of named cattle goes
+  // straight to add-another, where naming each one is the whole job.
+  return res.redirect(shape === 'herd'
+    ? '/record-results-tasks'
+    : '/v1-5/skin-test-reactions')
+})
+
+// Work out where the vet has got to, from what they have actually
+// recorded. Nothing is marked done by visiting a page - the counts are the
+// progress, which is what P1 asked for: "I like to see my list whittling
+// down in front of me."
+function recordTaskState(req) {
+  // Every task on this list hands off to a screen that expects the Mill
+  // House herd in session. Seeding here means the vet can land on the task
+  // list cold - from a bookmark, or a cleared session - and still get the
+  // same 102 cattle the rest of the journey uses.
+  if (recordSeedSession) { recordSeedSession(req, null) }
+
+  const data = req.session.data || {}
+  const animals = getAnimalsForSelection('12/312/6802', 'v1-4') || []
+
+  const untestedIds = Array.isArray(data.skinTestUntested) ? data.skinTestUntested : []
+  const reasons = data.skinTestUntestedReasons || {}
+  const untestedWithReason = untestedIds.filter(function (id) { return !!reasons[id] })
+
+  const byPhase = data.skinTestReactorsByPhase || {}
+  const statuses = data.skinTestReviewStatuses || {}
+  const reacted = new Set(
+    [].concat(byPhase.sicct || [], byPhase.diva || [])
+      .concat(Object.keys(statuses).filter(function (k) { return statuses[k] === 'reaction' }))
+  )
+
+  const named = new Set([].concat(untestedIds, Array.from(reacted)))
+  const rest = Math.max(animals.length - named.size, 0)
+
+  // Added cattle are not part of the printed 102, so they never change the
+  // "accounted for" sum - they are their own task with their own count.
+  const added = Array.isArray(data.skinTestAddedEntries) ? data.skinTestAddedEntries : []
+
+  // Confirming the rest is a decision the vet makes, not something we can
+  // infer - so it is held as its own answer. If they name more animals
+  // afterwards the confirmation still stands for whatever is left, which is
+  // why the count is recomputed each time rather than stored.
+  const restConfirmed = data.recordRestConfirmed === 'yes'
+
+  return {
+    total: animals.length,
+    untestedCount: untestedIds.length,
+    untestedNeedingReason: untestedIds.length - untestedWithReason.length,
+    reactedCount: reacted.size,
+    addedCount: added.length,
+    named: named.size,
+    rest: rest,
+    restConfirmed: restConfirmed,
+    accountedFor: restConfirmed ? animals.length : named.size,
+    remaining: restConfirmed ? 0 : rest
+  }
+}
+
+router.get('/record-results-tasks', function (req, res) {
+  req.session.data.recordTaskMode = 'yes'
+  req.session.data.recordTaskSection = null
+  req.session.data.recordTaskHome = '/record-results-tasks'
+  res.render('record-results-tasks', { task: recordTaskState(req) })
+})
+
+// Every task link goes through here, so the app knows which section the
+// vet is in and where that section ends. See RECORD_TASK_SECTIONS.
+router.get('/record-results-task/:section', function (req, res) {
+  const key = req.params.section
+  const section = RECORD_TASK_SECTIONS[key]
+  if (!section) return res.redirect('/record-results-tasks')
+  req.session.data.recordTaskMode = 'yes'
+  req.session.data.recordTaskSection = key
+
+  // A task with nothing in it opens on the screen that puts something in
+  // it. A task that already has something opens on what it has. Clicking
+  // "25 recorded" and landing on a 102-row picker with empty checkboxes
+  // is the service asking the vet to do the job again.
+  const task = recordTaskState(req)
+  const done = {
+    untested: task.untestedCount,
+    reactions: task.reactedCount,
+    'add-cattle': task.addedCount
+  }[key] || 0
+
+  res.redirect((section.review && done > 0) ? section.review : section.entry)
+})
+
+// One row per animal in a section, so the vet can read back what is
+// recorded and change any of it. The rows come from the same builder the
+// check-and-send page uses, so a reason or a set of readings reads the
+// same wherever it appears.
+const RECORD_REVIEWS = {
+  untested: {
+    heading: "Cattle that couldn't be tested",
+    lead: 'Check the reason given for each one. You can change any of them.',
+    // Add-another, not the bulk picker: naming one animal is a different
+    // job from choosing a set out of 102.
+    addHref: '/record-results-add/untested',
+    addText: 'Add another animal that could not be tested',
+    status: 'not-tested'
+  },
+  reactions: {
+    heading: 'Cattle that reacted',
+    lead: 'Check the four readings for each one. You can change any of them.',
+    addHref: '/v1-5/skin-test-reactions',
+    addText: 'Add another animal that reacted',
+    status: 'reaction'
+  }
+}
+
+// A single animal's record, on its own page. The review lists link here
+// rather than into the 102-row table: a vet who clicks Change on one
+// animal is asking to edit that animal, not to find it again in a list.
+const RECORD_EDIT_STATUSES = ['clear', 'reaction', 'not-tested']
+
+function recordEditRow(req, officialId) {
+  const rows = recordCheckList ? recordCheckList(req) : []
+  return rows.filter(function (r) { return r.officialId === officialId })[0] || null
+}
+
+// Where "Save and return" returns to. Three callers now open this screen -
+// the two section reviews and the check-and-send page - and a vet who
+// clicked Change on line 47 of the check list expects to land back on line
+// 47 of the check list, not on a task list they never saw.
+//
+// So the caller says where it came from and the page carries it through the
+// form. Only a path on this prototype is accepted: anything with a scheme,
+// a host, or a backslash is ignored and the old section-based answer is
+// used instead.
+function recordSafeReturn(value) {
+  const v = String(value || '')
+  if (!v || v.charAt(0) !== '/') return null
+  if (v.charAt(1) === '/' || v.indexOf('\\') !== -1 || v.indexOf(':') !== -1) return null
+  return v
+}
+
+function recordEditHome(req) {
+  const asked = recordSafeReturn(
+    (req.body && req.body.returnTo) || (req.query && req.query.return)
+  )
+  if (asked) return asked
+  const section = req.session.data.recordTaskSection
+  if (section === 'untested') return '/record-results-review/untested'
+  if (section === 'reactions') return '/record-results-review/reactions'
+  return req.session.data.recordTaskHome || '/record-results-tasks'
+}
+
+function recordEditView(req, row, values, errors) {
+  const data = req.session.data
+  return {
+    row: row,
+    values: values,
+    errors: errors || null,
+    errorList: errors ? Object.keys(errors).map(function (k) {
+      return { text: errors[k], href: '#' + k }
+    }) : [],
+    reasons: recordReasons ? recordReasons() : [],
+    back: recordEditHome(req),
+    // Rendered as a hidden field so the POST returns to the same place the
+    // GET would have, rather than falling back to the task list.
+    returnTo: recordSafeReturn(
+      (req.body && req.body.returnTo) || (req.query && req.query.return)
+    ),
+    total: (recordTaskState(req) || {}).total,
+    reasonOther: (data.skinTestUntestedReasonOthers || {})[row.officialId] || ''
+  }
+}
+
+router.get('/record-results-edit/:officialId', function (req, res) {
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  const row = recordEditRow(req, req.params.officialId)
+  if (!row) return res.redirect(recordEditHome(req))
+
+  const m = row.measurements || {}
+
+  // The screen opens showing what the vet just clicked Change on.
+  //
+  // Most of the herd has no explicit status: nothing was recorded against
+  // them individually, and the list reads them as Clear. That is right on
+  // the list, but it left this screen with no result selected at all - the
+  // check page said Clear, the edit page said nothing, and the vet had to
+  // re-answer a question they had already answered.
+  //
+  // Clear is pre-selected only where the clear-ness is recorded rather than
+  // assumed: either the animal carries the status, or the rest of the herd
+  // has been confirmed as tested with no reaction - which a handheld import
+  // does on arrival, and the paper journey does on its own task.
+  //
+  // Where neither is true, nothing is pre-selected. An untouched row on a
+  // part-typed paper list is not a clear animal, and the whole point of
+  // taking the default off /v1-4/skin-test-reactors was to stop the service
+  // answering for the vet.
+  const restConfirmed = req.session.data.recordRestConfirmed === 'yes'
+  const openingStatus = row.status ||
+    ((restConfirmed && row.outcome === 'clear') ? 'clear' : '')
+
+  res.render('record-results-edit', recordEditView(req, row, {
+    status: openingStatus,
+    reason: (req.session.data.skinTestUntestedReasons || {})[row.officialId] || '',
+    reasonOther: (req.session.data.skinTestUntestedReasonOthers || {})[row.officialId] || '',
+    avianBeforeInjection: m.avianBeforeInjection || '',
+    avianAfter72Hours: m.avianAfter72Hours || '',
+    bovineBeforeInjection: m.bovineBeforeInjection || '',
+    bovineAfter72Hours: m.bovineAfter72Hours || '',
+    avianOedema: m.avianOedema || 'C',
+    bovineOedema: m.bovineOedema || 'C',
+    reactorReference: row.reactorReference || ''
+  }))
+})
+
+router.post('/record-results-edit/:officialId', function (req, res) {
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  const row = recordEditRow(req, req.params.officialId)
+  if (!row) return res.redirect(recordEditHome(req))
+
+  const body = req.body || {}
+  const values = {
+    status: (body.status || '').trim(),
+    reason: (body.reason || '').trim(),
+    reasonOther: (body.reasonOther || '').trim(),
+    avianBeforeInjection: (body.avianBeforeInjection || '').trim(),
+    avianAfter72Hours: (body.avianAfter72Hours || '').trim(),
+    bovineBeforeInjection: (body.bovineBeforeInjection || '').trim(),
+    bovineAfter72Hours: (body.bovineAfter72Hours || '').trim(),
+    avianOedema: body.avianOedema === 'SO' ? 'SO' : 'C',
+    bovineOedema: body.bovineOedema === 'SO' ? 'SO' : 'C',
+    reactorReference: (body.reactorReference || '').trim()
+  }
+
+  const errors = {}
+  if (RECORD_EDIT_STATUSES.indexOf(values.status) === -1) {
+    errors.status = 'Select a result for this animal'
+  }
+
+  if (values.status === 'not-tested') {
+    if (!values.reason) errors.reason = 'Select why this animal was not tested'
+    else if (values.reason === 'other' && !values.reasonOther) {
+      errors.reasonOther = 'Enter the reason this animal was not tested'
+    }
+  }
+
+  let interpretation = null
+  if (values.status === 'reaction') {
+    const mm = /^\d{1,2}(\.\d)?$/
+    const fields = {
+      avianBeforeInjection: 'the avian measurement before injection',
+      avianAfter72Hours: 'the avian measurement after 72 hours',
+      bovineBeforeInjection: 'the bovine measurement before injection',
+      bovineAfter72Hours: 'the bovine measurement after 72 hours'
+    }
+    Object.keys(fields).forEach(function (f) {
+      if (!values[f]) errors[f] = 'Enter ' + fields[f]
+      else if (!mm.test(values[f])) errors[f] = 'Enter ' + fields[f] + ' in millimetres'
+    })
+    if (!Object.keys(errors).length) {
+      interpretation = sicctInterpretation.interpretSicct({
+        avianIncrease: parseFloat(values.avianAfter72Hours) - parseFloat(values.avianBeforeInjection),
+        bovineIncrease: parseFloat(values.bovineAfter72Hours) - parseFloat(values.bovineBeforeInjection),
+        avianOedema: values.avianOedema,
+        bovineOedema: values.bovineOedema,
+        interpretationType: 'standard'
+      })
+      // Only a reactor is tagged. An inconclusive animal stays on the farm
+      // to be retested, so there is no number to write down.
+      if (interpretation && interpretation.resultCode === 'REACTOR' && !values.reactorReference) {
+        errors.reactorReference = 'Enter the reactor tag number'
+      }
+    }
+  }
+
+  if (Object.keys(errors).length) {
+    return res.render('record-results-edit', recordEditView(req, row, values, errors))
+  }
+
+  recordSaveAnimal(req, row.officialId, {
+    status: values.status,
+    reason: values.reason,
+    reasonOther: values.reasonOther,
+    measurements: values.status === 'reaction' ? {
+      avianBeforeInjection: values.avianBeforeInjection,
+      avianAfter72Hours: values.avianAfter72Hours,
+      bovineBeforeInjection: values.bovineBeforeInjection,
+      bovineAfter72Hours: values.bovineAfter72Hours,
+      avianOedema: values.avianOedema,
+      bovineOedema: values.bovineOedema,
+      reactorReference: values.reactorReference
+    } : null
+  })
+
+  res.redirect(recordEditHome(req))
+})
+
+// Adding one animal to a section, the add-another way: name the animal,
+// give the reason, come back to the list with it on. The review page is
+// the "what you have added so far" half of the pattern; this is the
+// "add one" half. The old link went to the 102-row picker, which is a
+// different job - choosing a set, not adding a single animal.
+router.get('/record-results-add/untested', function (req, res) {
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  res.render('record-results-add-untested', recordAddView(req, { earTag: '', reason: '', reasonOther: '' }, null))
+})
+
+function recordAddView(req, values, errors) {
+  const animals = getAnimalsForSelection('12/312/6802', 'v1-4') || []
+  const accounted = new Set(
+    (Array.isArray(req.session.data.skinTestUntested) ? req.session.data.skinTestUntested : [])
+  )
+  return {
+    // Anything already on the not-tested list is not offered again - it is
+    // already there to be changed on the list behind this page.
+    suggestions: animals
+      .filter(function (a) { return !accounted.has(a.officialId) })
+      .map(function (a) { return { officialId: a.officialId } }),
+    reasons: recordReasons ? recordReasons() : [],
+    values: values,
+    errors: errors || null,
+    errorList: errors ? Object.keys(errors).map(function (k) {
+      return { text: errors[k], href: '#' + (k === 'earTag' ? 'earTag' : k) }
+    }) : [],
+    back: '/record-results-review/untested'
+  }
+}
+
+router.post('/record-results-add/untested', function (req, res) {
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  const body = req.body || {}
+  const values = {
+    earTag: (body.earTag || '').trim(),
+    reason: (body.reason || '').trim(),
+    reasonOther: (body.reasonOther || '').trim()
+  }
+
+  const animals = getAnimalsForSelection('12/312/6802', 'v1-4') || []
+  const known = new Set(animals.map(function (a) { return a.officialId }))
+
+  const errors = {}
+  if (!values.earTag) errors.earTag = 'Select the animal that could not be tested'
+  else if (!known.has(values.earTag)) errors.earTag = 'Enter an ear tag from this cattle list'
+  if (!values.reason) errors.reason = 'Select why this animal was not tested'
+  else if (values.reason === 'other' && !values.reasonOther) {
+    errors.reasonOther = 'Enter the reason this animal was not tested'
+  }
+
+  if (Object.keys(errors).length) {
+    return res.render('record-results-add-untested', recordAddView(req, values, errors))
+  }
+
+  recordSaveAnimal(req, values.earTag, {
+    status: 'not-tested',
+    reason: values.reason,
+    reasonOther: values.reasonOther
+  })
+
+  res.redirect('/record-results-review/untested')
+})
+
+router.get('/record-results-review/:section', function (req, res) {
+  const key = req.params.section
+  const review = RECORD_REVIEWS[key]
+  const home = req.session.data.recordTaskHome || '/record-results-tasks'
+  if (!review) return res.redirect(home)
+
+  if (recordSeedSession) { recordSeedSession(req, res) }
+  req.session.data.recordTaskMode = 'yes'
+  req.session.data.recordTaskSection = key
+
+  const all = recordCheckList ? recordCheckList(req) : []
+  const rows = all.filter(function (r) { return r.status === review.status })
+
+  res.render('record-results-review', {
+    mode: key,
+    review: review,
+    rows: rows,
+    home: home,
+    total: (recordTaskState(req) || {}).total
+  })
+})
+
+router.get('/record-results-confirm-rest', function (req, res) {
+  res.render('record-results-confirm-rest', { task: recordTaskState(req) })
+})
+
+router.post('/record-results-confirm-rest', function (req, res) {
+  req.session.data.recordRestConfirmed = 'yes'
+  return res.redirect('/record-results-tasks')
+})
 
 registerSkinTestRoutes('v1-1')
 registerSkinTestRoutes('v1-2')

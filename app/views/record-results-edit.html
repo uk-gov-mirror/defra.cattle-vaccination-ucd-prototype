@@ -1,0 +1,359 @@
+{% extends "layouts/main.html" %}
+
+{% set pageName="Animal " + row.n %}
+
+{% block content %}
+<style>
+  .app-ear-tag {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .app-ear-tag__prefix { margin-right: 0.35ch; }
+  .app-ear-tag__part { display: inline-block; }
+  .app-ear-tag__part--last4 { padding: 0; font-weight: 700; }
+  /* The reading grid, lifted from the row panel on
+     /v1-4/skin-test-reactors so the two behave and read identically. */
+  .app-sicct-panel {
+    background: #f3f2f1;
+    padding: 15px 20px;
+    max-width: 36rem;
+  }
+  .app-sicct-table { margin-bottom: 0; }
+  .app-sicct-table .govuk-table__caption { margin-bottom: 10px; }
+  .app-sicct-table .govuk-table__cell,
+  .app-sicct-table .govuk-table__header { padding: 6px 15px 6px 0; vertical-align: middle; }
+  .app-sicct-table .govuk-form-group { margin-bottom: 0; }
+  .app-sicct-table .govuk-input { background: #fff; }
+  /* One message per line, so several errors stay scannable instead of
+     running together as a paragraph. */
+  .app-sicct-errors { margin-bottom: 10px; }
+  .app-sicct-errors__line { display: block; }
+  .app-sicct-readout {
+    font-variant-numeric: tabular-nums;
+    color: #505a5f;
+    white-space: nowrap;
+  }
+  /* The footer row reads as a band closing the table. */
+  .app-sicct-result-row .govuk-table__header,
+  .app-sicct-result-row .govuk-table__cell { padding-top: 10px; padding-bottom: 10px; }
+  /* The C / SO select never holds more than two characters; govuk-select
+     sets a generous min-width, so both have to be overridden. */
+  .app-sicct-table .app-oedema-select { width: 5.5rem; min-width: 0; }
+  /* "Inconclusive reactor" wrapping inside the tag looks like an error. */
+  .app-sicct-result .govuk-tag { white-space: nowrap; }
+  .app-sicct-pending { color: #505a5f; }
+  .app-reactor-ref { margin-top: 15px; }
+  .app-reactor-ref .govuk-form-group { margin-bottom: 0; }
+  .app-reactor-ref .govuk-input { background: #fff; }
+</style>
+
+<div class="govuk-grid-row">
+  <div class="govuk-grid-column-two-thirds">
+
+    <a href="{{ back }}" class="govuk-back-link">Back</a>
+
+    {% if errors %}
+      {{ govukErrorSummary({ titleText: "There is a problem", errorList: errorList }) }}
+    {% endif %}
+
+    <span class="govuk-caption-l">Animal {{ row.n }} of {{ total }}</span>
+    <h1 class="govuk-heading-l">
+      <span class="app-ear-tag">
+        <span class="app-ear-tag__prefix">{{ row.earTagParts.prefix }}</span><span class="app-ear-tag__part">{{ row.earTagParts.herd }}</span><span class="app-ear-tag__part">{{ row.earTagParts.check }}</span><span class="app-ear-tag__part">{{ row.earTagParts.individualStart }}</span><span class="app-ear-tag__part app-ear-tag__part--last4">{{ row.earTagParts.last4 }}</span>
+      </span>
+    </h1>
+
+    {{ govukSummaryList({
+      rows: [
+        { key: { text: "Sex" }, value: { text: "Female" if row.sex == 'F' else ("Male" if row.sex == 'M' else row.sex) } },
+        { key: { text: "Breed" }, value: { text: row.breed } },
+        { key: { text: "Date of birth" }, value: { text: row.dob or "Not recorded" } }
+      ],
+      classes: "govuk-summary-list--no-border govuk-!-margin-bottom-6"
+    }) }}
+
+    <form action="/record-results-edit/{{ row.officialId }}" method="post" novalidate>
+
+      {# Where Save and return goes back to. The check-and-send page and the
+         two section reviews all open this screen, and each expects the vet
+         back where they clicked Change. #}
+      {% if returnTo %}<input type="hidden" name="returnTo" value="{{ returnTo }}">{% endif %}
+
+      {# One animal, one decision, and only the fields that decision needs.
+         The reason and the readings are revealed by the result rather than
+         living on separate screens, so the vet never has to hold "which
+         animal was I on" in their head between pages. #}
+      {% set notTestedHtml %}
+        <div class="govuk-form-group {% if errors and errors.reason %}govuk-form-group--error{% endif %}">
+          <fieldset class="govuk-fieldset">
+            <legend class="govuk-fieldset__legend govuk-fieldset__legend--s">Why was it not tested?</legend>
+            {% if errors and errors.reason %}
+              <p class="govuk-error-message" id="reason"><span class="govuk-visually-hidden">Error:</span> {{ errors.reason }}</p>
+            {% endif %}
+            <div class="govuk-radios govuk-radios--small" data-module="govuk-radios">
+              {% for r in reasons %}
+                <div class="govuk-radios__item">
+                  <input class="govuk-radios__input" id="reason-{{ loop.index }}" name="reason" type="radio" value="{{ r.value }}"
+                         {% if values.reason == r.value %}checked{% endif %}
+                         {% if r.value == 'other' %}data-aria-controls="reason-other-panel"{% endif %}>
+                  <label class="govuk-label govuk-radios__label" for="reason-{{ loop.index }}">{{ r.text }}</label>
+                  {% if r.hint %}<div class="govuk-hint govuk-radios__hint">{{ r.hint }}</div>{% endif %}
+                </div>
+                {% if r.value == 'other' %}
+                  <div class="govuk-radios__conditional govuk-radios__conditional--hidden" id="reason-other-panel">
+                    <div class="govuk-form-group {% if errors and errors.reasonOther %}govuk-form-group--error{% endif %}">
+                      <label class="govuk-label" for="reasonOther">Give the reason</label>
+                      {% if errors and errors.reasonOther %}
+                        <p class="govuk-error-message"><span class="govuk-visually-hidden">Error:</span> {{ errors.reasonOther }}</p>
+                      {% endif %}
+                      <input class="govuk-input govuk-!-width-two-thirds" id="reasonOther" name="reasonOther" type="text" value="{{ values.reasonOther }}">
+                    </div>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+      {% endset %}
+
+      {% set readingsHtml %}
+        {# The same reading grid as the row panel on /v1-4/skin-test-reactors,
+           and for the same reasons: the four figures are two pairs, and a
+           vet reading them off a TB64 wants them laid out as the sheet
+           lays them out - a row per site, day 1 beside day 2, with the
+           increase and the result worked out for them. #}
+        <div class="app-sicct-panel js-panel" data-animal="{{ row.officialId }}">
+
+          {% set _sicctErrors = [] %}
+          {% for _f in ['avianBeforeInjection', 'avianAfter72Hours', 'bovineBeforeInjection', 'bovineAfter72Hours'] %}
+            {% if errors and errors[_f] %}{% set _ = _sicctErrors.push(errors[_f]) %}{% endif %}
+          {% endfor %}
+          {% if _sicctErrors.length %}
+            <p class="govuk-error-message app-sicct-errors" id="sicct-errors">
+              <span class="govuk-visually-hidden">Error:</span>
+              {% for _m in _sicctErrors %}<span class="app-sicct-errors__line">{{ _m }}</span>{% endfor %}
+            </p>
+          {% endif %}
+
+          <table class="govuk-table govuk-table--small-text-until-tablet app-sicct-table" role="presentation">
+            <caption class="govuk-table__caption govuk-heading-s">
+              SICCT reading
+            </caption>
+            <thead class="govuk-table__head">
+              <tr class="govuk-table__row">
+                <th scope="col" class="govuk-table__header">Site</th>
+                <th scope="col" class="govuk-table__header">Day 1 (mm)</th>
+                <th scope="col" class="govuk-table__header">Day 2 (mm)</th>
+                <th scope="col" class="govuk-table__header">Reaction</th>
+                <th scope="col" class="govuk-table__header">Increase</th>
+              </tr>
+            </thead>
+            <tbody class="govuk-table__body">
+              <tr class="govuk-table__row">
+                <th scope="row" class="govuk-table__header">Avian</th>
+                <td class="govuk-table__cell">
+                  {{ govukInput({
+                    id: "avianBeforeInjection", name: "avianBeforeInjection",
+                    value: values.avianBeforeInjection,
+                    classes: "govuk-input--width-3 js-sicct-input" + (" govuk-input--error" if errors and errors.avianBeforeInjection else ""),
+                    label: { text: "Avian day 1 in millimetres", classes: "govuk-visually-hidden" },
+                    attributes: { inputmode: "decimal" }
+                  }) }}
+                </td>
+                <td class="govuk-table__cell">
+                  {{ govukInput({
+                    id: "avianAfter72Hours", name: "avianAfter72Hours",
+                    value: values.avianAfter72Hours,
+                    classes: "govuk-input--width-3 js-sicct-input" + (" govuk-input--error" if errors and errors.avianAfter72Hours else ""),
+                    label: { text: "Avian day 2 in millimetres", classes: "govuk-visually-hidden" },
+                    attributes: { inputmode: "decimal" }
+                  }) }}
+                </td>
+                <td class="govuk-table__cell">
+                  {{ govukSelect({
+                    id: "avianOedema", name: "avianOedema",
+                    classes: "js-sicct-input app-oedema-select",
+                    label: { text: "Avian reaction", classes: "govuk-visually-hidden" },
+                    items: [
+                      { value: "C", text: "C", selected: values.avianOedema != 'SO' },
+                      { value: "SO", text: "SO", selected: values.avianOedema == 'SO' }
+                    ]
+                  }) }}
+                </td>
+                <td class="govuk-table__cell app-sicct-readout js-increase-avian">&mdash;</td>
+              </tr>
+              <tr class="govuk-table__row">
+                <th scope="row" class="govuk-table__header">Bovine</th>
+                <td class="govuk-table__cell">
+                  {{ govukInput({
+                    id: "bovineBeforeInjection", name: "bovineBeforeInjection",
+                    value: values.bovineBeforeInjection,
+                    classes: "govuk-input--width-3 js-sicct-input" + (" govuk-input--error" if errors and errors.bovineBeforeInjection else ""),
+                    label: { text: "Bovine day 1 in millimetres", classes: "govuk-visually-hidden" },
+                    attributes: { inputmode: "decimal" }
+                  }) }}
+                </td>
+                <td class="govuk-table__cell">
+                  {{ govukInput({
+                    id: "bovineAfter72Hours", name: "bovineAfter72Hours",
+                    value: values.bovineAfter72Hours,
+                    classes: "govuk-input--width-3 js-sicct-input" + (" govuk-input--error" if errors and errors.bovineAfter72Hours else ""),
+                    label: { text: "Bovine day 2 in millimetres", classes: "govuk-visually-hidden" },
+                    attributes: { inputmode: "decimal" }
+                  }) }}
+                </td>
+                <td class="govuk-table__cell">
+                  {{ govukSelect({
+                    id: "bovineOedema", name: "bovineOedema",
+                    classes: "js-sicct-input app-oedema-select",
+                    label: { text: "Bovine reaction", classes: "govuk-visually-hidden" },
+                    items: [
+                      { value: "C", text: "C", selected: values.bovineOedema != 'SO' },
+                      { value: "SO", text: "SO", selected: values.bovineOedema == 'SO' }
+                    ]
+                  }) }}
+                </td>
+                <td class="govuk-table__cell app-sicct-readout js-increase-bovine">&mdash;</td>
+              </tr>
+            </tbody>
+            {# Calculated, never asked. In the table's own footer so
+               "Result" sits in the same column as Site, Avian and Bovine,
+               and reads as the last line of the grid it comes from. #}
+            <tfoot>
+              <tr class="govuk-table__row app-sicct-result-row">
+                <th scope="row" class="govuk-table__header">Result</th>
+                <td class="govuk-table__cell app-sicct-result" colspan="4">
+                  <span class="js-sicct-result">
+                    <span class="app-sicct-pending">Enter both readings</span>
+                  </span>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+
+          {# Only a reactor is tagged, so the box is only on the page for
+             one. Never taken away while it holds something typed, while an
+             error stands against it, or while the cursor is in it. #}
+          <div class="app-reactor-ref js-ref-wrap"{% if not (values.reactorReference or (errors and errors.reactorReference)) %} hidden{% endif %}>
+            {{ govukInput({
+              id: "reactorReference", name: "reactorReference",
+              value: values.reactorReference,
+              classes: "govuk-input--width-5 js-reactor-ref",
+              label: { text: "Reactor tag number" },
+              errorMessage: { text: errors.reactorReference } if errors and errors.reactorReference
+            }) }}
+          </div>
+        </div>
+      {% endset %}
+
+      {{ govukRadios({
+        idPrefix: "status",
+        name: "status",
+        fieldset: { legend: { text: "Result", classes: "govuk-fieldset__legend--m" } },
+        errorMessage: { text: errors.status } if errors and errors.status,
+        items: [
+          { value: "clear", text: "Clear", hint: { text: "Tested, no reaction at either site." }, checked: values.status == 'clear' },
+          { value: "reaction", text: "Reaction", checked: values.status == 'reaction', conditional: { html: readingsHtml } },
+          { value: "not-tested", text: "Not tested", checked: values.status == 'not-tested', conditional: { html: notTestedHtml } }
+        ]
+      }) }}
+
+      <div class="govuk-button-group">
+        {{ govukButton({ text: "Save and return" }) }}
+        <a class="govuk-link" href="{{ back }}">Cancel</a>
+      </div>
+    </form>
+
+  </div>
+</div>
+
+<script>
+  (function () {
+    var panel = document.querySelector('.js-panel')
+    if (!panel) return
+
+    function num(id) {
+      var el = panel.querySelector('#' + id)
+      if (!el) return NaN
+      var v = String(el.value || '').trim()
+      return v === '' ? NaN : Number(v)
+    }
+    function oedema(id) {
+      var el = panel.querySelector('#' + id)
+      return el ? el.value : 'C'
+    }
+    function mm(n) {
+      return (n >= 0 ? '+' : '') + String(n.toFixed(1)).replace(/\.0$/, '') + ' mm'
+    }
+    // The same rule the server runs, so the preview can never say one
+    // thing and the saved result another.
+    function isPositive(increaseMm, so) { return increaseMm > 2 || so === 'SO' }
+
+    function setText(el, text) { if (el && el.textContent !== text) el.textContent = text }
+    function setHtml(el, html) { if (el && el.innerHTML !== html) el.innerHTML = html }
+
+    // The reactor tag box is only on the page for an animal actually
+    // being taken as a reactor. Never taken away while it holds something
+    // typed, while an error stands against it, or while the cursor is in
+    // it - a field vanishing out from under someone is worse than one
+    // they did not need.
+    function syncRef(needed) {
+      var wrap = panel.querySelector('.js-ref-wrap')
+      if (!wrap) return
+      var input = wrap.querySelector('.js-reactor-ref')
+      var keep = needed
+        || !!(input && input.value.trim())
+        || !!wrap.querySelector('.govuk-error-message')
+        || wrap.contains(document.activeElement)
+      if (wrap.hidden !== keep) return
+      wrap.hidden = !keep
+    }
+
+    function recalc() {
+      var incA = panel.querySelector('.js-increase-avian')
+      var incB = panel.querySelector('.js-increase-bovine')
+      var out = panel.querySelector('.js-sicct-result')
+      var aPre = num('avianBeforeInjection')
+      var aPost = num('avianAfter72Hours')
+      var bPre = num('bovineBeforeInjection')
+      var bPost = num('bovineAfter72Hours')
+
+      setText(incA, (isNaN(aPre) || isNaN(aPost)) ? '\u2014' : mm(aPost - aPre))
+      setText(incB, (isNaN(bPre) || isNaN(bPost)) ? '\u2014' : mm(bPost - bPre))
+
+      if (isNaN(aPre) || isNaN(aPost) || isNaN(bPre) || isNaN(bPost)) {
+        setHtml(out, '<span class="app-sicct-pending">Enter both readings</span>')
+        return syncRef(false)
+      }
+
+      var aInc = aPost - aPre
+      var bInc = bPost - bPre
+      var d = bInc - aInc
+      var bovinePos = isPositive(bInc, oedema('bovineOedema'))
+      var avianPos = isPositive(aInc, oedema('avianOedema'))
+
+      var label = 'Inconclusive reactor'
+      var tag = 'yellow'
+      if (!bovinePos || (avianPos && d <= 0)) { label = 'Pass'; tag = 'green' }
+      else if (d > 4) { label = 'Reactor'; tag = 'red' }
+      setHtml(out, '<strong class="govuk-tag govuk-tag--' + tag + '">' + label + '</strong>')
+      syncRef(label === 'Reactor')
+    }
+
+    // Typing is a run of events; the readouts only need to settle at the
+    // end of it, so nothing is written to the DOM mid-keystroke.
+    var timer = null
+    function schedule() {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(recalc, 250)
+    }
+    panel.addEventListener('input', schedule)
+    panel.addEventListener('change', schedule)
+    recalc()
+  })()
+</script>
+{% endblock %}

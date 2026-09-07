@@ -10,9 +10,13 @@
    flow and only 302s away - so it was sending them somewhere they had never
    been. The last step before this page is the add-cattle question, or the
    added-cattle list when they added any. #}
+{# A vet who uploaded a file came straight here from the upload screen and
+   never saw the add-cattle question, so Back has to go where they were. #}
 {{ govukBackLink({
   text: "Back",
-  href: "/v1-4/skin-test-added-cattle" if (addedEntries and addedEntries.length > 0) else "/v1-4/skin-test-add-cattle-question"
+  href: "/record-results-upload" if fromDevice
+        else ("/v1-4/skin-test-added-cattle" if (addedEntries and addedEntries.length > 0)
+        else "/v1-4/skin-test-add-cattle-question")
 }) }}
 {% endblock %}
 
@@ -87,13 +91,23 @@
      exactly and always total the table's width, so the two grids put
      their columns in identical places and nothing overlaps its
      neighbour when a value runs long. */
+  /* The line number is the vet's place on the printed sheet, so it reads
+     left to right like the rest of the row and starts flush with the page
+     edge - level with the h1 and the back link above it. The table's own
+     padding-left is already 0; the number only looked indented because it
+     was right-aligned inside its column. Same treatment as the section
+     review screens, because it is the same column doing the same job. */
   .app-record-check .app-rec-num {
-    width: 5%;
-    text-align: right;
+    width: 7%;
+    text-align: left;
     color: #505a5f;
+    padding-left: 0;
     padding-right: 10px;
+    white-space: nowrap;
   }
-  .app-record-check .app-rec-tag { width: 28%; padding-right: 12px; }
+  /* 26 rather than 28 so the widths still total 100 now the line number
+     column has taken 2% to fit the word "Line". */
+  .app-record-check .app-rec-tag { width: 26%; padding-right: 12px; }
   .app-record-check .app-rec-site { width: 6%; font-weight: 700; }
   .app-record-check .app-rec-mm { width: 7%; }
   .app-record-check .app-rec-reaction { width: 13%; }
@@ -249,8 +263,19 @@
     <span class="govuk-caption-l">{{ data['herd']['farm'] }}</span>
     <h1 class="govuk-heading-l">Check and send</h1>
 
+    {# What the vet is checking against is not the same thing on the two
+       paths. Typed in from paper, they are checking their own typing
+       against the sheet in their hand. Uploaded from a handheld, the
+       typing was never theirs - what they are confirming is that the file
+       matches the yard. Naming the wrong source makes the sentence advice
+       for someone else. #}
     <p class="govuk-body">
-      Check what you recorded against your paper list before you send it.
+      {% if fromDevice %}
+        {{ checkList.length }} results came from your handheld. Check them
+        before you send the report to APHA.
+      {% else %}
+        Check what you recorded against your paper list before you send it.
+      {% endif %}
     </p>
 
     {% if isPartTest %}
@@ -261,12 +286,16 @@
     {% endif %}
 
 
-    {# Batch numbers entered on /skin-test-type are rendered as
-       bullet lists when there's more than one, or a plain line when
-       there's just one – matches how the vet entered them. When the
-       vet hasn't recorded anything earlier in the journey the page
-       falls back to a sensible dummy value so the prototype can be
-       demoed without forcing data entry. #}
+    {# Batch numbers entered on the batch details screen: a bullet list
+       when there is more than one, a plain line when there is one.
+
+       This page used to invent a batch number when the session held none,
+       so the prototype could be demoed without entering one. That made the
+       number true of this page and nothing else - Change opened an empty
+       field, and typing a new batch in changed a value the check page was
+       not reading. The demo batch is seeded into the session instead, so
+       what is shown here is what is stored. Nothing stored now reads the
+       way every other unanswered row on this page reads: not recorded. #}
     {% set sicctBatchesHtml %}
       {% if sicctBatches and sicctBatches.length > 1 %}
         <ul class="govuk-list govuk-list--bullet govuk-!-margin-bottom-0">
@@ -275,7 +304,7 @@
       {% elif sicctBatches and sicctBatches.length == 1 and sicctBatches[0] %}
         {{ sicctBatches[0] }}
       {% else %}
-        138009G
+        Not recorded
       {% endif %}
     {% endset %}
 
@@ -287,7 +316,7 @@
       {% elif divaBatches and divaBatches.length == 1 and divaBatches[0] %}
         {{ divaBatches[0] }}
       {% else %}
-        447112F
+        Not recorded
       {% endif %}
     {% endset %}
 
@@ -303,19 +332,19 @@
       {
         key: { text: "Day 1 (injection)" },
         value: { text: day1Formatted or "Not recorded" },
-        actions: { items: [{ href: "/v1-4/skin-test-date", text: "Change", visuallyHiddenText: "day 1 date and start time" }] }
+        actions: { items: [{ href: "/v1-4/skin-test-date?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "day 1 date and start time" }] }
       },
       {
         key: { text: "Day 2 (reading)" },
         value: {
           html: (day2Formatted or "Not recorded") + ('<br><span class="govuk-hint govuk-!-margin-bottom-0">Calculated as 72 hours after Day 1</span>' if day2Calculated and day2Formatted else '')
         },
-        actions: { items: [{ href: "/v1-4/skin-test-date", text: "Change", visuallyHiddenText: "day 2 date and start time" }] }
+        actions: { items: [{ href: "/v1-4/skin-test-date?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "day 2 date and start time" }] }
       },
       {
         key: { text: "Test type" },
         value: { text: (skinTestType or data['skinTestType'] or "Not recorded") | replace('Both', 'DIVA and SICCT') },
-        actions: { items: [{ href: "/v1-4/skin-test-type", text: "Change", visuallyHiddenText: "test type" }] }
+        actions: { items: [{ href: "/v1-4/skin-test-type?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "test type" }] }
       }
     ] %}
 
@@ -323,7 +352,7 @@
       {% set summaryRows = summaryRows.concat([{
         key: { text: "SICCT batch" + ("es" if sicctBatches.length > 1 else "") },
         value: { html: sicctBatchesHtml },
-        actions: { items: [{ href: "/v1-4/skin-test-batch-details/sicct", text: "Change", visuallyHiddenText: "SICCT batch numbers" }] }
+        actions: { items: [{ href: "/v1-4/skin-test-batch-details/sicct?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "SICCT batch numbers" }] }
       }]) %}
     {% endif %}
 
@@ -331,7 +360,7 @@
       {% set summaryRows = summaryRows.concat([{
         key: { text: "DIVA batch" + ("es" if divaBatches.length > 1 else "") },
         value: { html: divaBatchesHtml },
-        actions: { items: [{ href: "/v1-4/skin-test-batch-details/diva", text: "Change", visuallyHiddenText: "DIVA batch numbers" }] }
+        actions: { items: [{ href: "/v1-4/skin-test-batch-details/diva?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "DIVA batch numbers" }] }
       }]) %}
     {% endif %}
 
@@ -450,7 +479,10 @@
           <caption class="govuk-table__caption govuk-visually-hidden">{{ caption }}</caption>
           <thead class="govuk-table__head">
             <tr class="govuk-table__row">
-              <th scope="col" class="govuk-table__header app-rec-num">#</th>
+              {# "Line", not "#". It is the line on the printed sheet the vet
+                 is holding, and a hash is read out as "number sign" or
+                 skipped entirely by a screen reader. #}
+              <th scope="col" class="govuk-table__header app-rec-num">Line</th>
               <th scope="col" class="govuk-table__header app-rec-tag">Ear tag</th>
               {# No visible heading: the column holds A and B, which the
                  rows either side of it explain by context, and the word
@@ -467,7 +499,9 @@
             </tr>
           </thead>
           {% for row in rows %}
-            <tbody class="govuk-table__body app-rec-animal" data-n="{{ row.n }}" data-ear-tag="{{ row.officialId }}">
+            {# The id is what Change comes back to. The vet edits line 47 and
+               lands on line 47, not at the top of 102 rows. #}
+            <tbody class="govuk-table__body app-rec-animal" id="animal-{{ row.n }}" data-n="{{ row.n }}" data-ear-tag="{{ row.officialId }}">
               {% if row.measurements %}
                 <tr class="govuk-table__row">
                   <td class="govuk-table__cell app-rec-num" rowspan="2">{{ row.n }}</td>
@@ -540,11 +574,16 @@
       {%- endif -%}
     {% endmacro %}
 
-    {# Straight to the animal, not to the top of a list of 38. The review
-       page reads the fragment on load and brings that row to the vet, the
-       same way its own Go control does. #}
+    {# One animal, one page. Change used to drop the vet back into the
+       102-row recording table at this animal's row - which is asking them
+       to find it again in a list they have just been reading, with every
+       other animal's fields live around it. The edit screen is this one
+       animal: its result, and only the fields that result needs.
+
+       The return is carried on the link so Save and return comes back
+       here, to the line the vet clicked, rather than to the task list. #}
     {% macro changeCell(row) %}
-      <a class="govuk-link" href="/v1-4/skin-test-reactors#animal-{{ row.n }}">Change<span class="govuk-visually-hidden"> the result for animal {{ row.n }}, {{ row.officialId }}</span></a>
+      <a class="govuk-link" href="/record-results-edit/{{ row.officialId }}?return=%2Fv1-4%2Fskin-test-confirmation%23animal-{{ row.n }}">Change<span class="govuk-visually-hidden"> the result for animal {{ row.n }}, {{ row.officialId }}</span></a>
     {% endmacro %}
 
     {# Counts for the headline. checkList holds every animal now, so these
@@ -597,7 +636,7 @@
     {% set declarationRow = {
       key: { text: "Declaration" },
       value: { text: declarationText },
-      actions: { items: [{ href: "/v1-4/skin-test-all-tested", text: "Change", visuallyHiddenText: "the declaration that all cattle were tested" }] }
+      actions: { items: [{ href: "/v1-4/skin-test-all-tested?return=%2Fv1-4%2Fskin-test-confirmation", text: "Change", visuallyHiddenText: "the declaration that all cattle were tested" }] }
     } %}
 
     {% if isBothJourney %}
@@ -665,7 +704,10 @@
             <button type="button" class="govuk-button govuk-button--secondary app-page-nav__button" id="check-go-to-button">
               Go<span class="govuk-visually-hidden"> to animal</span>
             </button>
-            <span class="govuk-hint app-page-nav__hint" id="check-go-to-hint">Animal number, or the last 4 digits of the ear tag</span>
+            {# Says "Line" because that is what the column is called now. A
+               hint naming a thing the vet cannot see on the page is worse
+               than no hint. #}
+            <span class="govuk-hint app-page-nav__hint" id="check-go-to-hint">Line number, or the last 4 digits of the ear tag</span>
           </div>
         </nav>
 
@@ -833,7 +875,7 @@
       })
     }
 
-    // Up to 3 characters reads as the number in the # column; 4 or more
+    // Up to 3 characters reads as the number in the Line column; 4 or more
     // as an ear tag. Whichever finds nothing, the other is tried.
     function findMatch(raw) {
       var q = normTag(raw)

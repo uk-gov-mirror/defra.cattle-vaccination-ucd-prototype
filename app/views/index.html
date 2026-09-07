@@ -239,15 +239,16 @@
       </ul>
 
       <p class="govuk-inset-text">
-        These are part journeys. All three start on the recording screen
-        itself, with Mill House Farm and a SICCT test already loaded, so there
-        is nothing to set up before you begin.
+        These are part journeys. All of them start with Mill House Farm and a
+        SICCT test already loaded, so there is nothing to set up before you
+        begin.
       </p>
 
+      {# One way in. The start page names the journeys by what the vet does
+         and puts the check-data question in front of them, which is where a
+         participant should be choosing - not from a row of build numbers. #}
       <div class="govuk-button-group govuk-!-margin-bottom-3">
-        {{ govukButton({ text: "Start V5 - Table", href: "v1-4/skin-test-reactors", classes: "govuk-!-margin-bottom-0" }) }}
-        {{ govukButton({ text: "Start V5 - Add another", href: "v1-5/skin-test-reactions", classes: "govuk-button--secondary govuk-!-margin-bottom-0" }) }}
-        {{ govukButton({ text: "Start V4 - Three passes", href: "v1-3/skin-test-reactors", classes: "govuk-button--secondary govuk-!-margin-bottom-0" }) }}
+        {{ govukButton({ text: "Start", href: "start", classes: "govuk-!-margin-bottom-0" }) }}
       </div>
 
       <ul class="govuk-list app-version-card__links">

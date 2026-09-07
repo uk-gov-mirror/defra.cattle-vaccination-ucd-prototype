@@ -1,0 +1,121 @@
+{# The four jobs that make up a skin test report, as one task list.
+
+   Shared by the paper journey (/record-results-tasks) and the device
+   journey (/record-results-check) so both show the same four tasks in the
+   same words with the same links. The only difference between the two
+   pages is how the counts got there: on paper the vet fills them in, from
+   a device they arrive already filled and the vet is checking them.
+
+   Every href goes through /record-results-task/... rather than straight to
+   the screen. That entry route records which section the vet is in, so
+   when the section ends the journey returns to the list instead of running
+   on into the rest of the standalone flow.
+
+   Expects `task` (see recordTaskState in routes.js). #}
+
+{% from "govuk/components/task-list/macro.njk" import govukTaskList %}
+
+{# Three statuses, not five. The Design System asks for the smallest set
+   that works - "start with the smallest number of different statuses you
+   think might work" - so every task reads the same way:
+
+     Not started        nothing recorded yet
+     N recorded         N animals accounted for by this task
+     N need a reason    the one problem state, and the only tag
+
+   The count is the progress, which is what a vet asked for: "I like to see
+   my list kind of whittling down in front of me." Anything that is scope
+   rather than progress - how many cattle a task would cover - belongs in
+   the hint, not the status. #}
+
+{% set NOT_STARTED = { text: "Not started", classes: "govuk-task-list__status--cannot-start-yet" } %}
+
+{% set untestedStatus = NOT_STARTED %}
+{% if task.untestedNeedingReason > 0 %}
+  {% set untestedStatus = { tag: {
+    text: task.untestedNeedingReason | string + (" needs a reason" if task.untestedNeedingReason == 1 else " need a reason"),
+    classes: "govuk-tag--yellow"
+  } } %}
+{% elif task.untestedCount > 0 %}
+  {% set untestedStatus = { text: task.untestedCount | string + " recorded" } %}
+{% endif %}
+
+{% set reactedStatus = NOT_STARTED %}
+{% if task.reactedCount > 0 %}
+  {% set reactedStatus = { text: task.reactedCount | string + " recorded" } %}
+{% endif %}
+
+{% set addedStatus = NOT_STARTED %}
+{% if task.addedCount > 0 %}
+  {% set addedStatus = { text: task.addedCount | string + " recorded" } %}
+{% endif %}
+
+{% set restStatus = NOT_STARTED %}
+{% if task.restConfirmed %}
+  {% set restStatus = { text: task.rest | string + " recorded" } %}
+{% endif %}
+
+{# The same four categories on both paths, worded for two different jobs.
+
+   On paper the vet does the work, so the rows are instructions with a hint
+   saying what belongs in each category: name the animals, type the
+   readings. From a handheld the work is already done, so the rows are four
+   plain statements of what arrived and a count - and they carry no hint at
+   all, because "Not tested / 25" needs no explaining. Telling a vet to
+   "name each animal and enter its 4 readings" when the device has already
+   entered them describes work that does not exist.
+
+   The word "cattle" is dropped from those four. The heading says the page
+   is about results and the panel counts them, so repeating the noun on
+   every row costs a word and buys nothing.
+
+   "No reaction" stays singular. "No reactions" beside a count of 66 can be
+   read as "there were no reactions", which is the opposite of true when 11
+   of them reacted.
+
+   Set `taskMode` to "check" before including this on the device path;
+   anything else gives the recording wording. #}
+{% set _check = taskMode == "check" %}
+
+{# The four rows, defined once and ordered per path below. #}
+{% set _untested = {
+  title: { text: "Not tested" if _check else "Cattle you could not test" },
+  hint: null if _check else { text: "Missing, dead, too young, or tested somewhere else in the last 60 days." },
+  href: "/record-results-task/untested",
+  status: untestedStatus
+} %}
+
+{% set _reacted = {
+  title: { text: "Reactions" if _check else "Cattle that reacted" },
+  hint: null if _check else { text: "Name each animal and enter its 4 readings." },
+  href: "/record-results-task/reactions",
+  status: reactedStatus
+} %}
+
+{% set _added = {
+  title: { text: "Not on the printed list" if _check else "Cattle not on the list" },
+  hint: null if _check else { text: "Cattle you tested that are not on the printed list." },
+  href: "/record-results-task/add-cattle",
+  status: addedStatus
+} %}
+
+{% set _rest = {
+  title: { text: "No reaction" if _check else "Confirm the rest were tested with no reaction" },
+  hint: null if _check else { text: ((task.rest | string) + " cattle you have not named above." if task.rest > 0 else "Every animal is already named above.") },
+  href: "/record-results-confirm-rest",
+  status: restStatus
+} %}
+
+{# Two orders, because the two lists answer different questions.
+
+   Checking a file, the order is by what matters: reactors first - they are
+   what APHA acts on - then the herd that passed, then the exceptions, then
+   the one animal that should not be here.
+
+   Recording on paper, the order is the work. "Confirm the rest" has to come
+   last: until the exceptions are named, "the rest" is the whole herd. #}
+{% set _items = [_reacted, _rest, _untested, _added]
+                if _check else
+                [_untested, _reacted, _added, _rest] %}
+
+{{ govukTaskList({ idPrefix: "record", items: _items }) }}

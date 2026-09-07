@@ -12,6 +12,30 @@
 {% endblock %}
 
 {% block content %}
+<style>
+  /* The same ear tag as the printed list, the recording table and the
+     check page. An animal is identified by its whole number everywhere
+     else in the service; this page was showing four digits of it, which is
+     the one part a vet cannot safely read alone - it is exactly the
+     collision the banding exists to warn about. */
+  .app-ear-tag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .app-ear-tag__prefix { margin-right: 0.35ch; }
+  .app-ear-tag__part { display: inline-block; }
+  .app-ear-tag__part--last4 { padding: 0; font-weight: 700; }
+  .app-ear-tag__part--last4--duplicate {
+    border: 0;
+    border-top: 4px solid #000;
+    border-bottom: 4px solid #000;
+  }
+</style>
 <div class="govuk-grid-row">
   <div class="govuk-grid-column-two-thirds">
 
@@ -37,10 +61,16 @@
     {% else %}
       {% set addedRows = [] %}
       {% for entry in addedEntries %}
+        {# The whole tag, split the way the sheet prints it: last 4 bold,
+           and banded top and bottom when another animal on this farm ends
+           in the same four digits. #}
+        {% set tagHtml %}
+          <span class="app-ear-tag"><span class="app-ear-tag__prefix">{{ entry.earTagParts.prefix }}</span><span class="app-ear-tag__part">{{ entry.earTagParts.herd }}</span><span class="app-ear-tag__part">{{ entry.earTagParts.check }}</span><span class="app-ear-tag__part">{{ entry.earTagParts.individualStart }}</span><span class="app-ear-tag__part app-ear-tag__part--last4{% if entry.isDuplicate %} app-ear-tag__part--last4--duplicate{% endif %}"{% if entry.isDuplicate %} title="Another animal on this farm shares the last 4 digits of this ear tag"{% endif %}>{{ entry.earTagParts.last4 }}</span></span>
+        {% endset %}
         {% set addedRows = addedRows.concat([{
-          key: { text: entry.earTagParts.last4 },
+          key: { html: tagHtml },
           value: { text: (entry.breed or "Breed not recorded") + " · " + (entry.sex or "Sex not recorded") + " · DOB " + (entry.dob or "not recorded") },
-          actions: { items: [{ href: "/v1-4/skin-test-add-another/edit/" + entry.officialId, text: "Change", visuallyHiddenText: "details for " + entry.earTagParts.last4 }] }
+          actions: { items: [{ href: "/v1-4/skin-test-add-another/edit/" + entry.officialId, text: "Change", visuallyHiddenText: "details for " + entry.officialId }] }
         }]) %}
       {% endfor %}
       {{ govukSummaryList({ rows: addedRows }) }}
