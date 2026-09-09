@@ -184,8 +184,6 @@
     padding: 15px 20px 15px 16px;
     margin: 0;
   }
-  .app-detail__heading { margin-bottom: 12px; }
-
   /* The SICCT reading grid inside the panel. Two rows (avian, bovine)
      against Day 1 / Day 2 / Reaction / Increase, so a site's numbers and
      its C / SO description sit on one line and the calculated result
@@ -198,8 +196,7 @@
      otherwise. The legend carries no styling of its own - the heading
      inside it is doing that job. */
   .app-detail__group { min-width: 0; border: 0; padding: 0; margin: 0; }
-  .app-detail__legend { padding: 0; width: 100%; }
-  .app-detail__legend .app-detail__heading { margin-bottom: 10px; }
+  .app-detail__legend { padding: 0; width: 100%; margin-bottom: 10px; }
 
   .app-sicct-table { max-width: 34rem; margin-bottom: 20px; }
   .app-sicct-table .govuk-table__cell,
@@ -947,15 +944,28 @@
                    cannot drift apart. #}
                 <div class="app-detail js-detail-panel js-detail-reaction{% if animal.status != 'reaction' %} app-detail--hidden{% endif %}"
                      data-animal="{{ animal.officialId }}">
-                  {# The number leads, because it is what the vet is
-                     reading off the paper sheet. No "of 38" here - the
-                     row's own legend has just said it, and repeating it
-                     inside the panel only lengthens every announcement. #}
+                  {# The legend names the panel and nothing more.
+
+                     It deliberately does NOT carry a heading or the ear
+                     tag. A legend is the fieldset's accessible name, so
+                     whatever is in here is re-announced as the group label
+                     every time focus enters one of the measurement inputs
+                     below - six times per animal. The full tag, spelled
+                     out one character at a time by the site-wide script in
+                     layouts/main.html, made that announcement roughly four
+                     times longer for information the vet already has: the
+                     row directly above shows the tag, and they reached
+                     this panel by setting that row's own result.
+
+                     It was also an <h3>, which put one heading per animal
+                     into the page outline - up to 184 of them on a large
+                     herd, appearing and disappearing as panels open and
+                     close. The per-page <h2> above is the map of this
+                     page; the rows are a table, and a table is what a
+                     screen reader should navigate them as. #}
                   <fieldset class="govuk-fieldset app-detail__group">
-                  <legend class="govuk-fieldset__legend app-detail__legend">
-                    <h3 class="govuk-heading-s app-detail__heading">
-                      {{ currentTestLabel }} reading for animal {{ _n }}, {{ animal.officialId }}
-                    </h3>
+                  <legend class="govuk-fieldset__legend govuk-fieldset__legend--s app-detail__legend">
+                    {{ currentTestLabel }} readings for animal {{ _n }}
                   </legend>
                   {# Errors for this animal's readings, collected into one
                      block above the grid.
